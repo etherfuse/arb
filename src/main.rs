@@ -4,7 +4,6 @@ mod field_as_string;
 mod jito;
 mod jupiter;
 mod purchase;
-mod run;
 mod send_and_confirm;
 
 use anyhow::Result;
@@ -12,6 +11,7 @@ use args::*;
 use clap::{arg, command, Parser, Subcommand};
 use futures::StreamExt;
 use jito::Tip;
+use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_program::native_token::lamports_to_sol;
 use solana_sdk::{
@@ -28,15 +28,12 @@ struct Arber {
     pub etherfuse_url: Option<String>,
     pub jupiter_quote_url: Option<String>,
     pub jupiter_price_url: Option<String>,
-    pub jito_client: Arc<RpcClient>,
+    pub jito_client: HttpClient,
     pub jito_tip: Arc<std::sync::RwLock<u64>>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    #[command(about = "Run arb bot")]
-    Run(RunArgs),
-
     #[command(about = "Purchase a bond")]
     Purchase(PurchaseArgs),
 
@@ -119,12 +116,12 @@ struct Args {
 
     #[arg(
         long,
-        value_name = "JITO_URL",
-        help = "URL to the Jito API",
-        default_value = "https://mainnet.block-engine.jito.wtf/api/v1/transactions",
+        value_name = "JITO_BUNDLES_URL",
+        help = "URL to the Jito Bundles API",
+        default_value = "https://mainnet.block-engine.jito.wtf/api/v1/bundles",
         global = true
     )]
-    jito_url: Option<String>,
+    jito_bundles_url: Option<String>,
 
     #[arg(
         long,
@@ -181,7 +178,9 @@ async fn main() -> Result<()> {
         });
     }
 
-    let jito_client = RpcClient::new(args.jito_url.expect("Jito URL not provided"));
+    let jito_client: HttpClient = HttpClientBuilder::default()
+        .build(args.jito_bundles_url.clone().unwrap())
+        .expect("Error");
 
     let arber = Arber::new(
         Arc::new(rpc_client),
@@ -190,12 +189,11 @@ async fn main() -> Result<()> {
         args.etherfuse_url,
         args.jupiter_quote_url,
         args.jupiter_price_url,
-        Arc::new(jito_client),
+        jito_client,
         tip,
     );
 
     match args.command {
-        Commands::Run(run_args) => arber.run(run_args).await,
         Commands::Purchase(purchase_args) => arber.purchase(purchase_args).await,
         Commands::GetEtherfusePrice(etherfuse_price_args) => {
             arber.get_etherfuse_price(etherfuse_price_args).await
@@ -219,7 +217,7 @@ impl Arber {
         etherfuse_url: Option<String>,
         jupiter_quote_url: Option<String>,
         jupiter_price_url: Option<String>,
-        jito_client: Arc<RpcClient>,
+        jito_client: HttpClient,
         jito_tip: Arc<std::sync::RwLock<u64>>,
     ) -> Self {
         Self {

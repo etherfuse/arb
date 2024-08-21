@@ -2,9 +2,6 @@ use clap::{arg, Parser};
 use solana_program::pubkey::Pubkey;
 
 #[derive(Parser, Debug)]
-pub struct RunArgs {}
-
-#[derive(Parser, Debug)]
 pub struct PurchaseArgs {
     #[arg(
         value_name = "AMOUNT",

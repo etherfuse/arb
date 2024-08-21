@@ -3,13 +3,33 @@ use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
     signature::{Signature, Signer},
-    transaction::Transaction,
+    transaction::{Transaction, VersionedTransaction},
 };
 
 use crate::Arber;
 
 impl Arber {
-    pub async fn send_and_confirm(&self, ixs: &[Instruction]) -> Result<Signature> {
+    pub async fn send_and_confirm_tx(&self, tx: VersionedTransaction) -> Result<Signature> {
+        let signed_tx = VersionedTransaction::try_new(tx.message, &[&self.signer()])
+            .map_err(|e| anyhow::anyhow!("Failed to create transaction: {}", e))?;
+
+        match self
+            .rpc_client
+            .send_and_confirm_transaction(&signed_tx)
+            .await
+        {
+            Ok(signature) => {
+                println!("Signature: {:?}", signature);
+                Ok(signature)
+            }
+            Err(err) => {
+                eprintln!("Error: {:?}", err);
+                Err(err.into())
+            }
+        }
+    }
+
+    pub async fn send_and_confirm_ixs(&self, ixs: &[Instruction]) -> Result<Signature> {
         let priority_fee_ix = ComputeBudgetInstruction::set_compute_unit_price(100000);
         let mut ixs_with_priority = vec![priority_fee_ix];
         ixs_with_priority.extend_from_slice(ixs);
@@ -19,10 +39,11 @@ impl Arber {
             Transaction::new_with_payer(&ixs_with_priority, Some(&self.signer().pubkey()));
         tx.sign(&[&signing_keypair], recent_blockhash);
 
-        println!("Transaction signer pubkey: {:?}", self.signer().pubkey());
-
         match self.rpc_client.send_and_confirm_transaction(&tx).await {
-            Ok(signature) => Ok(signature),
+            Ok(signature) => {
+                println!("Signature: {:?}", signature);
+                Ok(signature)
+            }
             Err(err) => {
                 eprintln!("Error: {:?}", err);
                 Err(err.into())

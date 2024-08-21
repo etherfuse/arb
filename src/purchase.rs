@@ -69,15 +69,7 @@ impl Arber {
         }
         .instruction(ix_args);
 
-        match self.send_and_confirm(&[ix]).await {
-            Ok(v) => {
-                println!("Purchase successful: {:?}", v);
-                Ok(())
-            }
-            Err(err) => {
-                eprintln!("Error: {:?}", err);
-                return Err(err.into());
-            }
-        }
+        self.send_and_confirm_ixs(&[ix]).await?;
+        Ok(())
     }
 }

@@ -73,10 +73,9 @@ impl Arber {
             bincode::deserialize(&base64::decode(base64_transaction)?).map_err(|err| err.into())
         }
 
-        let swap_transaction = decode(response.swap_transaction)?;
-        println!("Swap transaction: {:?}", swap_transaction);
+        let swap_transaction: VersionedTransaction = decode(response.swap_transaction)?;
+        self.send_and_confirm_tx(swap_transaction).await?;
         Ok(())
-        //self.swap_with_config(route, SwapConfig::default()).await
     }
 }
 
