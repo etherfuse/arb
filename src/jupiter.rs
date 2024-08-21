@@ -1,6 +1,8 @@
+use solana_sdk::signer::Signer;
+
 use crate::args::{JupiterPriceArgs, JupiterQuoteArgs};
-use crate::field_as_string;
 use crate::Arber;
+use crate::{field_as_string, JupiterSwapArgs};
 
 use {
     anyhow::Result,
@@ -25,7 +27,7 @@ impl Arber {
         Ok(())
     }
 
-    pub async fn get_jupiter_quote(&self, args: JupiterQuoteArgs) -> Result<()> {
+    pub async fn get_jupiter_quote(&self, args: JupiterQuoteArgs) -> Result<Quote> {
         let url = format!(
             "{}/quote?inputMint={}&outputMint={}&amount={}&slippageBps={}",
             self.jupiter_quote_url.as_ref().unwrap(),
@@ -35,34 +37,24 @@ impl Arber {
             args.slippage_bps,
         );
 
-        let res: serde_json::Value =
-            maybe_jupiter_api_error(reqwest::get(url).await?.json().await?)?;
-        println!("Quote: {:?}", res);
-        Ok(())
+        let quote = maybe_jupiter_api_error(reqwest::get(url).await?.json().await?)?;
+        println!("Quote: {:?}", quote);
+        Ok(quote)
     }
 
-    pub async fn jupiter_swap(&self, route: Quote, user_public_key: Pubkey) -> Result<Swap> {
-        self.swap_with_config(route, user_public_key, SwapConfig::default())
-            .await
-    }
-
-    async fn swap_with_config(
-        &self,
-        quote_response: Quote,
-        user_public_key: Pubkey,
-        _swap_config: SwapConfig,
-    ) -> Result<Swap> {
+    pub async fn jupiter_swap(&self, args: JupiterSwapArgs) -> Result<()> {
         let url = format!("{}/swap", self.jupiter_quote_url.as_ref().unwrap());
 
+        let quote = self.get_jupiter_quote(args.into()).await?;
         let request = SwapRequest {
-            user_public_key,
+            user_public_key: self.signer().pubkey(),
             wrap_and_unwrap_SOL: Some(true),
             prioritization_fee_lamports: Some(self.priority_fee.unwrap_or(0)),
             as_legacy_transaction: Some(false),
             dynamic_compute_unit_limit: Some(true),
-            quote_response: quote_response.clone(),
-            context_slot: quote_response.context_slot,
-            time_taken: quote_response.time_taken,
+            quote_response: quote.clone(),
+            context_slot: quote.context_slot,
+            time_taken: quote.time_taken,
         };
 
         let response = maybe_jupiter_api_error::<SwapResponse>(
@@ -81,9 +73,10 @@ impl Arber {
             bincode::deserialize(&base64::decode(base64_transaction)?).map_err(|err| err.into())
         }
 
-        Ok(Swap {
-            swap_transaction: decode(response.swap_transaction)?,
-        })
+        let swap_transaction = decode(response.swap_transaction)?;
+        println!("Swap transaction: {:?}", swap_transaction);
+        Ok(())
+        //self.swap_with_config(route, SwapConfig::default()).await
     }
 }
 

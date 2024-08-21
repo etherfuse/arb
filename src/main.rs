@@ -41,6 +41,9 @@ enum Commands {
 
     #[command(about = "Get jupiter quote")]
     GetJupiterQuote(JupiterQuoteArgs),
+
+    #[command(about = "Jupiter swap")]
+    JupiterSwap(JupiterSwapArgs),
 }
 
 #[derive(Parser)]
@@ -148,8 +151,10 @@ async fn main() -> Result<()> {
             arber.get_jupiter_price(jupiter_price_args).await
         }
         Commands::GetJupiterQuote(jupiter_quote_args) => {
-            arber.get_jupiter_quote(jupiter_quote_args).await
+            let _ = arber.get_jupiter_quote(jupiter_quote_args).await;
+            Ok(())
         }
+        Commands::JupiterSwap(jupiter_swap_args) => arber.jupiter_swap(jupiter_swap_args).await,
     }
 }
 
