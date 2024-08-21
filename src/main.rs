@@ -1,6 +1,7 @@
 mod args;
 mod etherfuse;
 mod field_as_string;
+mod jito;
 mod jupiter;
 mod purchase;
 mod run;
@@ -9,12 +10,16 @@ mod send_and_confirm;
 use anyhow::Result;
 use args::*;
 use clap::{arg, command, Parser, Subcommand};
+use futures::StreamExt;
+use jito::Tip;
 use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_program::native_token::lamports_to_sol;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     signature::{read_keypair_file, Keypair},
 };
-use std::sync::Arc;
+use std::{sync::Arc, sync::RwLock};
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 struct Arber {
     pub keypair_filepath: Option<String>,
@@ -23,6 +28,8 @@ struct Arber {
     pub etherfuse_url: Option<String>,
     pub jupiter_quote_url: Option<String>,
     pub jupiter_price_url: Option<String>,
+    pub jito_client: Arc<RpcClient>,
+    pub jito_tip: Arc<std::sync::RwLock<u64>>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -109,6 +116,25 @@ struct Args {
         global = true
     )]
     jupiter_price_url: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "JITO_URL",
+        help = "URL to the Jito API",
+        default_value = "https://mainnet.block-engine.jito.wtf/api/v1/transactions",
+        global = true
+    )]
+    jito_url: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "JITO_TIP",
+        help = "Jito tip amount",
+        default_value = "false",
+        global = true
+    )]
+    use_jito: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -131,6 +157,31 @@ async fn main() -> Result<()> {
     let cluster = args.rpc.unwrap_or(cli_config.json_rpc_url);
     let default_keypair = args.keypair.unwrap_or(cli_config.keypair_path.clone());
     let rpc_client = RpcClient::new_with_commitment(cluster, CommitmentConfig::confirmed());
+    let tip = Arc::new(RwLock::new(0_u64));
+    let tip_clone = Arc::clone(&tip);
+
+    if args.use_jito {
+        let url = "ws://bundles-api-rest.jito.wtf/api/v1/bundles/tip_stream";
+        let (ws_stream, _) = connect_async(url).await.unwrap();
+        let (_, mut read) = ws_stream.split();
+
+        tokio::spawn(async move {
+            while let Some(message) = read.next().await {
+                if let Ok(Message::Text(text)) = message {
+                    if let Ok(tips) = serde_json::from_str::<Vec<Tip>>(&text) {
+                        for item in tips {
+                            let mut tip = tip_clone.write().unwrap();
+                            *tip =
+                                (item.ema_landed_tips_50th_percentile * (10_f64).powf(9.0)) as u64;
+                            println!("Tip in SOL: {}", lamports_to_sol(*tip));
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    let jito_client = RpcClient::new(args.jito_url.expect("Jito URL not provided"));
 
     let arber = Arber::new(
         Arc::new(rpc_client),
@@ -139,6 +190,8 @@ async fn main() -> Result<()> {
         args.etherfuse_url,
         args.jupiter_quote_url,
         args.jupiter_price_url,
+        Arc::new(jito_client),
+        tip,
     );
 
     match args.command {
@@ -166,6 +219,8 @@ impl Arber {
         etherfuse_url: Option<String>,
         jupiter_quote_url: Option<String>,
         jupiter_price_url: Option<String>,
+        jito_client: Arc<RpcClient>,
+        jito_tip: Arc<std::sync::RwLock<u64>>,
     ) -> Self {
         Self {
             rpc_client,
@@ -174,6 +229,8 @@ impl Arber {
             etherfuse_url,
             jupiter_quote_url,
             jupiter_price_url,
+            jito_client,
+            jito_tip,
         }
     }
 
