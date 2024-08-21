@@ -27,18 +27,16 @@ impl Arber {
 
     pub async fn get_jupiter_quote(&self, args: JupiterQuoteArgs) -> Result<()> {
         let url = format!(
-            "{}/quote?inputMint={}&outputMint={}&amount={}&onlyDirectRoutes={}&{}&slippageBps={}{}",
+            "{}/quote?inputMint={}&outputMint={}&amount={}&slippageBps={}",
             self.jupiter_quote_url.as_ref().unwrap(),
             args.input_mint,
             args.output_mint,
             args.amount,
-            false,
-            false,
             args.slippage_bps,
-            0,
         );
 
-        let res: Response<Quote> = maybe_jupiter_api_error(reqwest::get(url).await?.json().await?)?;
+        let res: serde_json::Value =
+            maybe_jupiter_api_error(reqwest::get(url).await?.json().await?)?;
         println!("Quote: {:?}", res);
         Ok(())
     }

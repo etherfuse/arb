@@ -3,7 +3,6 @@ mod etherfuse;
 mod field_as_string;
 mod jupiter;
 mod purchase;
-mod quote;
 mod run;
 mod send_and_confirm;
 
