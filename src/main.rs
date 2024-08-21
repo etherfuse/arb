@@ -1,9 +1,11 @@
 mod args;
+mod etherfuse;
+mod field_as_string;
+mod jupiter;
 mod purchase;
 mod quote;
 mod run;
 mod send_and_confirm;
-mod swap;
 
 use anyhow::Result;
 use args::*;
@@ -18,9 +20,10 @@ use std::sync::Arc;
 struct Arber {
     pub keypair_filepath: Option<String>,
     pub priority_fee: Option<u64>,
-    pub dynamic_fee_url: Option<String>,
-    pub dynamic_fee: bool,
     pub rpc_client: Arc<RpcClient>,
+    pub etherfuse_url: Option<String>,
+    pub jupiter_quote_url: Option<String>,
+    pub jupiter_price_url: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -30,6 +33,15 @@ enum Commands {
 
     #[command(about = "Purchase a bond")]
     Purchase(PurchaseArgs),
+
+    #[command(about = "Get etherfuse price of a bond")]
+    GetEtherfusePrice(EtherfusePriceArgs),
+
+    #[command(about = "Get jupiter price")]
+    GetJupiterPrice(JupiterPriceArgs),
+
+    #[command(about = "Get jupiter quote")]
+    GetJupiterQuote(JupiterQuoteArgs),
 }
 
 #[derive(Parser)]
@@ -71,15 +83,30 @@ struct Args {
 
     #[arg(
         long,
-        value_name = "DYNAMIC_FEE_URL",
-        help = "RPC URL to use for dynamic fee estimation.",
+        value_name = "ETHERFUSE_API_URL",
+        help = "URL to the Etherfuse API",
+        default_value = "https://api.etherfuse.com",
         global = true
     )]
-    dynamic_fee_url: Option<String>,
+    etherfuse_url: Option<String>,
 
-    #[arg(long, help = "Enable dynamic priority fees", global = true)]
-    dynamic_fee: bool,
+    #[arg(
+        long,
+        value_name = "JUPITER_QUOTE_API_URL",
+        help = "URL to the Jupiter Quote API",
+        default_value = "https://quote-api.jup.ag/v6",
+        global = true
+    )]
+    jupiter_quote_url: Option<String>,
 
+    #[arg(
+        long,
+        value_name = "JUPITER_PRICE_API_URL",
+        help = "URL to the Jupiter Price API",
+        default_value = "https://price.jup.ag/v4",
+        global = true
+    )]
+    jupiter_price_url: Option<String>,
     #[command(subcommand)]
     command: Commands,
 }
@@ -107,13 +134,23 @@ async fn main() -> Result<()> {
         Arc::new(rpc_client),
         Some(default_keypair),
         args.priority_fee,
-        args.dynamic_fee_url,
-        args.dynamic_fee,
+        args.etherfuse_url,
+        args.jupiter_quote_url,
+        args.jupiter_price_url,
     );
 
     match args.command {
         Commands::Run(run_args) => arber.run(run_args).await,
         Commands::Purchase(purchase_args) => arber.purchase(purchase_args).await,
+        Commands::GetEtherfusePrice(etherfuse_price_args) => {
+            arber.get_etherfuse_price(etherfuse_price_args).await
+        }
+        Commands::GetJupiterPrice(jupiter_price_args) => {
+            arber.get_jupiter_price(jupiter_price_args).await
+        }
+        Commands::GetJupiterQuote(jupiter_quote_args) => {
+            arber.get_jupiter_quote(jupiter_quote_args).await
+        }
     }
 }
 
@@ -122,15 +159,17 @@ impl Arber {
         rpc_client: Arc<RpcClient>,
         keypair_filepath: Option<String>,
         priority_fee: Option<u64>,
-        dynamic_fee_url: Option<String>,
-        dynamic_fee: bool,
+        etherfuse_url: Option<String>,
+        jupiter_quote_url: Option<String>,
+        jupiter_price_url: Option<String>,
     ) -> Self {
         Self {
             rpc_client,
             keypair_filepath,
             priority_fee,
-            dynamic_fee_url,
-            dynamic_fee,
+            etherfuse_url,
+            jupiter_quote_url,
+            jupiter_price_url,
         }
     }
 
