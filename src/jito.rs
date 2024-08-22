@@ -18,6 +18,7 @@ impl Arber {
             .await?;
 
         println!("Tippers: {:?}", tippers);
+        println!("Tip: {:?}", *self.jito_tip.read().unwrap());
 
         let tip_ix = system_instruction::transfer(
             &self.signer().pubkey(),

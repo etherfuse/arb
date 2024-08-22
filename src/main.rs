@@ -197,6 +197,13 @@ async fn main() -> Result<()> {
         tip,
     );
 
+    //if the command is test arb and the tip is still 0, we wait until its not
+    if let Commands::TestArb(_) = args.command {
+        while *arber.jito_tip.read().unwrap() == 0 {
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }
+    }
+
     match args.command {
         Commands::Purchase(purchase_args) => arber.purchase(purchase_args).await,
         Commands::GetEtherfusePrice(etherfuse_price_args) => {
