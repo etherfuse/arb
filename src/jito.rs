@@ -5,16 +5,28 @@ use base58::ToBase58;
 use jsonrpsee::core::client::ClientT;
 use jsonrpsee::rpc_params;
 use serde::Deserialize;
-use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction,
-    instruction::Instruction,
-    signature::{Signature, Signer},
-    transaction::Transaction,
-};
+use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signer::Signer;
+use solana_sdk::system_instruction;
+use solana_sdk::transaction::VersionedTransaction;
 
 impl Arber {
-    pub async fn send_bundle(&self, txs: &[Transaction]) -> Result<()> {
-        //bincode::serialize every transaction and convert it to Vec<String>
+    pub async fn send_bundle(&self, txs: &[VersionedTransaction]) -> Result<()> {
+        let tippers: Vec<String> = self
+            .jito_client
+            .request("getTipAccounts", rpc_params![""])
+            .await?;
+
+        println!("Tippers: {:?}", tippers);
+
+        let tip_ix = system_instruction::transfer(
+            &self.signer().pubkey(),
+            &Pubkey::try_from(tippers[0].to_string().as_str()).unwrap(),
+            *self.jito_tip.read().unwrap(),
+        );
+        let tip_tx = self.build_and_sign_tx(&[tip_ix]).await?;
+        let txs = [&[tip_tx], txs].concat();
+
         let txs: Vec<String> = txs
             .iter()
             .map(|tx| bincode::serialize(tx).unwrap().to_base58())

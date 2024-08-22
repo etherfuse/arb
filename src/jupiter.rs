@@ -74,8 +74,43 @@ impl Arber {
         }
 
         let swap_transaction: VersionedTransaction = decode(response.swap_transaction)?;
-        self.send_and_confirm_tx(swap_transaction).await?;
+        self.sign_and_send_tx(swap_transaction).await?;
         Ok(())
+    }
+
+    pub async fn jupiter_swap_tx(&self, args: JupiterSwapArgs) -> Result<VersionedTransaction> {
+        let url = format!("{}/swap", self.jupiter_quote_url.as_ref().unwrap());
+
+        let quote = self.get_jupiter_quote(args.into()).await?;
+        let request = SwapRequest {
+            user_public_key: self.signer().pubkey(),
+            wrap_and_unwrap_SOL: Some(true),
+            prioritization_fee_lamports: Some(self.priority_fee.unwrap_or(0)),
+            as_legacy_transaction: Some(false),
+            dynamic_compute_unit_limit: Some(true),
+            quote_response: quote.clone(),
+            context_slot: quote.context_slot,
+            time_taken: quote.time_taken,
+        };
+
+        let response = maybe_jupiter_api_error::<SwapResponse>(
+            reqwest::Client::builder()
+                .build()?
+                .post(url)
+                .json(&request)
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?,
+        )?;
+
+        fn decode(base64_transaction: String) -> Result<VersionedTransaction> {
+            bincode::deserialize(&base64::decode(base64_transaction)?).map_err(|err| err.into())
+        }
+
+        let swap_transaction: VersionedTransaction = decode(response.swap_transaction)?;
+        Ok(swap_transaction)
     }
 }
 

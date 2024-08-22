@@ -4,7 +4,7 @@ mod field_as_string;
 mod jito;
 mod jupiter;
 mod purchase;
-mod send_and_confirm;
+mod transaction;
 
 use anyhow::Result;
 use args::*;
@@ -17,6 +17,7 @@ use solana_program::native_token::lamports_to_sol;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     signature::{read_keypair_file, Keypair},
+    transaction::VersionedTransaction,
 };
 use std::{sync::Arc, sync::RwLock};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
@@ -48,6 +49,9 @@ enum Commands {
 
     #[command(about = "Jupiter swap")]
     JupiterSwap(JupiterSwapArgs),
+
+    #[command(about = "Test arb bot")]
+    TestArb(TestArbArgs),
 }
 
 #[derive(Parser)]
@@ -206,6 +210,15 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Commands::JupiterSwap(jupiter_swap_args) => arber.jupiter_swap(jupiter_swap_args).await,
+        Commands::TestArb(test_arb_args) => {
+            let test_arb_args_clone = test_arb_args.clone();
+            let swap_tx = arber.jupiter_swap_tx(test_arb_args.into()).await?;
+            let purchase_tx = arber.purchase_tx(test_arb_args_clone.into()).await?;
+            let txs: &[VersionedTransaction] = &[swap_tx, purchase_tx];
+            let res = arber.send_bundle(txs).await;
+            println!("{:?}", res);
+            Ok(())
+        }
     }
 }
 
