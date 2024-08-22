@@ -17,18 +17,15 @@ impl Arber {
             .request("getTipAccounts", rpc_params![""])
             .await?;
 
-        println!("Tippers: {:?}", tippers);
-        println!("Tip: {:?}", *self.jito_tip.read().unwrap());
-
         let tip_ix = system_instruction::transfer(
             &self.signer().pubkey(),
             &Pubkey::try_from(tippers[0].to_string().as_str()).unwrap(),
             *self.jito_tip.read().unwrap(),
         );
         let tip_tx = self.build_and_sign_tx(&[tip_ix]).await?;
-        let txs = [&[tip_tx], txs].concat();
 
-        let txs: Vec<String> = txs
+        let txs: Vec<String> = [txs, &[tip_tx]]
+            .concat()
             .iter()
             .map(|tx| bincode::serialize(tx).unwrap().to_base58())
             .collect::<Vec<String>>();

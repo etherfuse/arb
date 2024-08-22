@@ -110,7 +110,7 @@ impl Arber {
         }
 
         let swap_transaction: VersionedTransaction = decode(response.swap_transaction)?;
-        Ok(swap_transaction)
+        self.sign_tx(swap_transaction)
     }
 }
 

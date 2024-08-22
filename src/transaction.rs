@@ -21,9 +21,12 @@ impl Arber {
         ixs_with_priority.extend_from_slice(ixs);
         let recent_blockhash = self.rpc_client.get_latest_blockhash().await?;
         let signing_keypair = self.signer();
-        let mut tx: Transaction =
-            Transaction::new_with_payer(&ixs_with_priority, Some(&self.signer().pubkey()));
-        tx.sign(&[&signing_keypair], recent_blockhash);
+        let tx: Transaction = Transaction::new_signed_with_payer(
+            &ixs_with_priority,
+            Some(&self.signer().pubkey()),
+            &[&signing_keypair],
+            recent_blockhash,
+        );
         Ok(tx.into())
     }
 
