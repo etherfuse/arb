@@ -33,8 +33,8 @@ impl Arber {
         let params = rpc_params![txs];
         let resp: Result<String, _> = self.jito_client.request("sendBundle", params).await;
         match resp {
-            Ok(signature) => {
-                println!("Signature: {:?}", signature);
+            Ok(bundle) => {
+                println!("https://explorer.jito.wtf/bundle/{bundle}");
             }
             Err(err) => {
                 eprintln!("Error: {:?}", err);

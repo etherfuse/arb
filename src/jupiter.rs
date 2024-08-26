@@ -1,6 +1,6 @@
 use solana_sdk::signer::Signer;
 
-use crate::args::{JupiterPriceArgs, JupiterQuoteArgs};
+use crate::args::JupiterQuoteArgs;
 use crate::Arber;
 use crate::{field_as_string, JupiterSwapArgs};
 
@@ -15,18 +15,6 @@ use {
 };
 
 impl Arber {
-    pub async fn get_jupiter_price(&self, args: JupiterPriceArgs) -> Result<()> {
-        let url = format!(
-            "{}/price?ids={}&vsToken={}",
-            self.jupiter_price_url.as_ref().unwrap(),
-            args.input_mint,
-            args.output_mint,
-        );
-        let res: Response<Price> = maybe_jupiter_api_error(reqwest::get(url).await?.json().await?)?;
-        println!("Price: {:?}", res);
-        Ok(())
-    }
-
     pub async fn get_jupiter_quote(&self, args: JupiterQuoteArgs) -> Result<Quote> {
         let url = format!(
             "{}/quote?inputMint={}&outputMint={}&amount={}&slippageBps={}",
@@ -34,11 +22,10 @@ impl Arber {
             args.input_mint,
             args.output_mint,
             args.amount,
-            args.slippage_bps,
+            args.slippage_bps.unwrap_or(300),
         );
 
         let quote = maybe_jupiter_api_error(reqwest::get(url).await?.json().await?)?;
-        println!("Quote: {:?}", quote);
         Ok(quote)
     }
 
@@ -49,7 +36,7 @@ impl Arber {
         let request = SwapRequest {
             user_public_key: self.signer().pubkey(),
             wrap_and_unwrap_SOL: Some(true),
-            prioritization_fee_lamports: Some(self.priority_fee.unwrap_or(0)),
+            prioritization_fee_lamports: None,
             as_legacy_transaction: Some(false),
             dynamic_compute_unit_limit: Some(true),
             quote_response: quote.clone(),
@@ -85,7 +72,7 @@ impl Arber {
         let request = SwapRequest {
             user_public_key: self.signer().pubkey(),
             wrap_and_unwrap_SOL: Some(true),
-            prioritization_fee_lamports: Some(self.priority_fee.unwrap_or(0)),
+            prioritization_fee_lamports: None,
             as_legacy_transaction: Some(false),
             dynamic_compute_unit_limit: Some(true),
             quote_response: quote.clone(),

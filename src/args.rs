@@ -20,15 +20,6 @@ pub struct EtherfusePriceArgs {
 }
 
 #[derive(Parser, Debug)]
-pub struct JupiterPriceArgs {
-    #[arg(value_name = "INPUT_MINT", help = "Public key of the input mint")]
-    pub input_mint: Pubkey,
-
-    #[arg(value_name = "OUTPUT_MINT", help = "Public key of the output mint")]
-    pub output_mint: Pubkey,
-}
-
-#[derive(Parser, Debug)]
 pub struct JupiterQuoteArgs {
     #[arg(value_name = "INPUT_MINT", help = "Public key of the input mint")]
     pub input_mint: Pubkey,
@@ -46,7 +37,7 @@ pub struct JupiterQuoteArgs {
         value_name = "SLIPPAGE_BPS",
         help = "Slippage in basis points (10000 = 100%)"
     )]
-    pub slippage_bps: u64,
+    pub slippage_bps: Option<u64>,
 }
 
 #[derive(Parser, Debug)]
@@ -67,11 +58,11 @@ pub struct JupiterSwapArgs {
         value_name = "SLIPPAGE_BPS",
         help = "Slippage in basis points (10000 = 100%)"
     )]
-    pub slippage_bps: u64,
+    pub slippage_bps: Option<u64>,
 }
 
 #[derive(Parser, Debug, Clone)]
-pub struct TestArbArgs {
+pub struct RunArgs {
     #[arg(value_name = "INPUT_MINT", help = "Public key of the input mint")]
     pub input_mint: Pubkey,
 
@@ -88,7 +79,7 @@ pub struct TestArbArgs {
         value_name = "SLIPPAGE_BPS",
         help = "Slippage in basis points (10000 = 100%)"
     )]
-    pub slippage_bps: u64,
+    pub slippage_bps: Option<u64>,
 }
 
 impl From<JupiterSwapArgs> for JupiterQuoteArgs {
@@ -102,22 +93,24 @@ impl From<JupiterSwapArgs> for JupiterQuoteArgs {
     }
 }
 
-impl From<TestArbArgs> for JupiterSwapArgs {
-    fn from(test_arb_args: TestArbArgs) -> Self {
+impl From<RunArgs> for JupiterSwapArgs {
+    fn from(run_args: RunArgs) -> Self {
         Self {
-            input_mint: test_arb_args.input_mint,
-            output_mint: test_arb_args.output_mint,
-            amount: test_arb_args.amount,
-            slippage_bps: test_arb_args.slippage_bps,
+            input_mint: run_args.input_mint,
+            output_mint: run_args.output_mint,
+            amount: run_args.amount,
+            slippage_bps: run_args.slippage_bps,
         }
     }
 }
 
-impl From<TestArbArgs> for PurchaseArgs {
-    fn from(test_arb_args: TestArbArgs) -> Self {
+impl From<RunArgs> for JupiterQuoteArgs {
+    fn from(run_args: RunArgs) -> Self {
         Self {
-            mint: test_arb_args.output_mint,
-            amount: test_arb_args.amount,
+            input_mint: run_args.input_mint,
+            output_mint: run_args.output_mint,
+            amount: run_args.amount,
+            slippage_bps: run_args.slippage_bps,
         }
     }
 }
