@@ -1,5 +1,5 @@
 [package]
-name = "arb"
+name = "etherfuse-arb"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
@@ -9,7 +9,7 @@ readme = "./README.md"
 keywords = ["solana", "crypto", "defi", "arbitrage"]
 
 [[bin]]
-name = "arb"
+name = "etherfuse-arb"
 path = "src/main.rs"
 
 [dependencies]
