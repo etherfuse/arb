@@ -6,8 +6,8 @@ use solana_sdk::transaction::VersionedTransaction;
 
 impl Arber {
     pub async fn run(&self, args: RunArgs) -> Result<()> {
-        // run a task that checks arb every 5 minutes
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        // run a task that checks arb every 1 minute
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
             self.check_arb(args.clone()).await?;
