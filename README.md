@@ -8,6 +8,7 @@ To install the CLI, use [cargo](https://doc.rust-lang.org/cargo/getting-started/
 
 ```sh
 cargo install etherfuse-arb
+```
 
 ## Help
 
@@ -20,4 +21,6 @@ etherfuse-arb --help
 ## Example command
 
 ```
-etherfuse-arb run --keypair ~/.config/solana/id.json CETES7CKqqKQizuSN6iWQwmTeFRjbJR6Vw2XRKfEDR8f EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v 1000000
+etherfuse-arb run --keypair ~/.config/solana/id.json \
+CETES7CKqqKQizuSN6iWQwmTeFRjbJR6Vw2XRKfEDR8f EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v 1000000
+```
