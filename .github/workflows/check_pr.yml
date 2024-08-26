@@ -1,0 +1,22 @@
+name: "Check PR"
+on: pull_request
+concurrency:
+  group: pr-${{ github.head_ref }}
+  cancel-in-progress: true
+jobs:
+  Check_Rust_SDK:
+    name: "Check Rust SDK"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install asdf dependencies
+        uses: asdf-vm/actions/install@v3
+      - name: Cache Dependencies
+        uses: Swatinem/rust-cache@v2.7.3
+      - name: Build Rust Package
+        working-directory: .
+        run: cargo build --locked --release
+      - name: Dry Run Publish Rust Package
+        working-directory: .
+        run: cargo publish --dry-run --no-verify
