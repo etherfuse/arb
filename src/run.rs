@@ -1,5 +1,5 @@
-use crate::args::{JupiterQuoteArgs, JupiterSwapArgs, RunArgs};
-use crate::constants;
+use crate::args::{JupiterQuoteArgs, RunArgs};
+use crate::constants::{MIN_USDC_AMOUNT, STABLEBOND_DECIMALS, USDC_DECIMALS, USDC_MINT};
 use crate::jupiter::Quote;
 use crate::{Arber, PurchaseArgs};
 
@@ -21,41 +21,38 @@ impl Arber {
     async fn check_arb(&self, args: RunArgs) -> Result<()> {
         let usdc_balance = self.update_usdc_balance().await?;
         // get etherfuse price of token
-        let etherfuse_price_token_to_usd = self.get_etherfuse_price(args.etherfuse_token).await?;
-        let max_etherfuse_ui_amount_to_purchase =
-            (usdc_balance / etherfuse_price_token_to_usd) * 0.95;
-        let mut etherfuse_token_amount_to_purchase = to_token_amount(
-            max_etherfuse_ui_amount_to_purchase,
-            constants::ETHERFUSE_TOKEN_DECIMALS,
-        );
+        let stablebond_price_to_usd = self.get_etherfuse_price(args.etherfuse_token).await?;
+        let max_usdc_ui_amount_to_purchase = usdc_balance * 0.99;
+        let mut usdc_token_amount = to_token_amount(max_usdc_ui_amount_to_purchase, USDC_DECIMALS);
 
+        let stablebond_ui_amount = max_usdc_ui_amount_to_purchase / stablebond_price_to_usd;
+        let mut stablebond_token_amount =
+            to_token_amount(stablebond_ui_amount, STABLEBOND_DECIMALS);
         // get jupiter price of token based on quoted amount of USDC in users wallet
         let (mut jup_price_token_to_usd, mut quote) = self
-            .sell_quote(args.clone(), etherfuse_token_amount_to_purchase)
+            .sell_quote(args.clone(), stablebond_token_amount)
             .await?;
 
-        while etherfuse_token_amount_to_purchase > 0
-            && (jup_price_token_to_usd < etherfuse_price_token_to_usd)
+        while usdc_token_amount > MIN_USDC_AMOUNT
+            && (jup_price_token_to_usd < stablebond_price_to_usd)
         {
             // reduce the amount of tokens to purchase to see if arb exists on smaller trade
-            etherfuse_token_amount_to_purchase /= 2;
+            stablebond_token_amount /= 2;
+            usdc_token_amount /= 2;
             (jup_price_token_to_usd, quote) = self
-                .sell_quote(args.clone(), etherfuse_token_amount_to_purchase)
+                .sell_quote(args.clone(), stablebond_token_amount)
                 .await?;
         }
-        if etherfuse_token_amount_to_purchase > 0 {
+        if usdc_token_amount > MIN_USDC_AMOUNT {
             println!("Arb opportunity: jupiter token price > etherfuse price honored. Purchase tokens from etherfuse and sell on jupiter");
             let purchase_args = PurchaseArgs {
-                amount: quote.in_amount,
+                amount: usdc_token_amount,
                 mint: args.etherfuse_token,
             };
-            println!("Purchase args: {:?}", purchase_args);
             let purchase_tx = self.purchase_tx(purchase_args).await?;
-            let _swap_tx = self.jupiter_swap_tx(quote).await?;
-            let txs: &[VersionedTransaction] = &[swap_tx];
+            let swap_tx = self.jupiter_swap_tx(quote).await?;
+            let txs: &[VersionedTransaction] = &[purchase_tx, swap_tx];
             self.send_bundle(txs).await?;
-        } else {
-            println!("Arb opportunity: etherfuse price honored < jupiter token price. Purchase tokens from jupiter and sell on etherfuse");
         }
         Ok(())
     }
@@ -63,7 +60,7 @@ impl Arber {
     async fn sell_quote(&self, args: RunArgs, amount: u64) -> Result<(f64, Quote)> {
         let jupiter_quote_args = JupiterQuoteArgs {
             input_mint: args.etherfuse_token,
-            output_mint: Pubkey::from_str(constants::USDC_MINT).unwrap(),
+            output_mint: Pubkey::from_str(USDC_MINT).unwrap(),
             amount,
             slippage_bps: Some(args.slippage_bps.unwrap_or(300)),
         };
@@ -76,7 +73,7 @@ impl Arber {
     async fn update_usdc_balance(&self) -> Result<f64> {
         let user_usdc_token_account = get_associated_token_address(
             &self.signer().pubkey(),
-            &Pubkey::from_str(constants::USDC_MINT).unwrap(),
+            &Pubkey::from_str(USDC_MINT).unwrap(),
         );
         let token_account = self
             .rpc_client
