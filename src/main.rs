@@ -4,6 +4,7 @@ mod etherfuse;
 mod field_as_string;
 mod jito;
 mod jupiter;
+mod math;
 mod purchase;
 mod run;
 mod transaction;

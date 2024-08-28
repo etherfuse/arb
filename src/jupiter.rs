@@ -68,7 +68,6 @@ impl Arber {
     pub async fn jupiter_swap_tx(&self, quote: Quote) -> Result<VersionedTransaction> {
         let url = format!("{}/swap", self.jupiter_quote_url.as_ref().unwrap());
 
-        println!("Quote: {:?}", quote);
         let request = SwapRequest {
             user_public_key: self.signer().pubkey(),
             wrap_and_unwrap_SOL: Some(true),

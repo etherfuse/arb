@@ -1,6 +1,7 @@
 use crate::args::{JupiterQuoteArgs, RunArgs};
 use crate::constants::{MIN_USDC_AMOUNT, STABLEBOND_DECIMALS, USDC_DECIMALS, USDC_MINT};
 use crate::jupiter::Quote;
+use crate::math;
 use crate::{Arber, PurchaseArgs};
 
 use anyhow::Result;
@@ -14,6 +15,7 @@ impl Arber {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
+            println!("Checking for arb opportunity");
             self.check_arb(args.clone()).await?;
         }
     }
@@ -22,12 +24,13 @@ impl Arber {
         let usdc_balance = self.update_usdc_balance().await?;
         // get etherfuse price of token
         let stablebond_price_to_usd = self.get_etherfuse_price(args.etherfuse_token).await?;
-        let max_usdc_ui_amount_to_purchase = usdc_balance * 0.99;
+        let max_usdc_ui_amount_to_purchase = math::checked_float_mul(usdc_balance, 0.99)?;
         let mut usdc_token_amount = to_token_amount(max_usdc_ui_amount_to_purchase, USDC_DECIMALS);
 
-        let stablebond_ui_amount = max_usdc_ui_amount_to_purchase / stablebond_price_to_usd;
+        let stablebond_ui_amount =
+            math::checked_float_div(max_usdc_ui_amount_to_purchase, stablebond_price_to_usd)?;
         let mut stablebond_token_amount =
-            to_token_amount(stablebond_ui_amount, STABLEBOND_DECIMALS);
+            math::to_token_amount(stablebond_ui_amount, STABLEBOND_DECIMALS)?;
         // get jupiter price of token based on quoted amount of USDC in users wallet
         let (mut jup_price_token_to_usd, mut quote) = self
             .sell_quote(args.clone(), stablebond_token_amount)
@@ -37,8 +40,8 @@ impl Arber {
             && (jup_price_token_to_usd < stablebond_price_to_usd)
         {
             // reduce the amount of tokens to purchase to see if arb exists on smaller trade
-            stablebond_token_amount /= 2;
-            usdc_token_amount /= 2;
+            usdc_token_amount = math::checked_div(usdc_token_amount, 2)?;
+            stablebond_token_amount = math::checked_div(stablebond_token_amount, 2)?;
             (jup_price_token_to_usd, quote) = self
                 .sell_quote(args.clone(), stablebond_token_amount)
                 .await?;
