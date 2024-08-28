@@ -1,6 +1,6 @@
 [package]
 name = "etherfuse-arb"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "A command line interface for transacting arbitrage opportunities on etherfuse."
@@ -40,3 +40,5 @@ thiserror = "1.0.50"
 tokio = { version = "1.39.2", features = ["full"] }
 tokio-tungstenite = "0.16"
 url = "2.5"
+num-derive = "^0.3"
+num-traits = "^0.2"

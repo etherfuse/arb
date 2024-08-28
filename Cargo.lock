@@ -1434,7 +1434,7 @@ dependencies = [
 
 [[package]]
 name = "etherfuse-arb"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base58",
@@ -1444,6 +1444,8 @@ dependencies = [
  "colored",
  "futures",
  "jsonrpsee",
+ "num-derive 0.3.3",
+ "num-traits",
  "reqwest",
  "serde",
  "serde_json",

@@ -63,17 +63,11 @@ pub struct JupiterSwapArgs {
 
 #[derive(Parser, Debug, Clone)]
 pub struct RunArgs {
-    #[arg(value_name = "INPUT_MINT", help = "Public key of the input mint")]
-    pub input_mint: Pubkey,
-
-    #[arg(value_name = "OUTPUT_MINT", help = "Public key of the output mint")]
-    pub output_mint: Pubkey,
-
     #[arg(
-        value_name = "AMOUNT",
-        help = "Amount of tokens to swap in token amount"
+        value_name = "ETHERFUSE_TOKEN",
+        help = "Public key of the etherfuse token"
     )]
-    pub amount: u64,
+    pub etherfuse_token: Pubkey,
 
     #[arg(
         value_name = "SLIPPAGE_BPS",
@@ -89,28 +83,6 @@ impl From<JupiterSwapArgs> for JupiterQuoteArgs {
             output_mint: swap_args.output_mint,
             amount: swap_args.amount,
             slippage_bps: swap_args.slippage_bps,
-        }
-    }
-}
-
-impl From<RunArgs> for JupiterSwapArgs {
-    fn from(run_args: RunArgs) -> Self {
-        Self {
-            input_mint: run_args.input_mint,
-            output_mint: run_args.output_mint,
-            amount: run_args.amount,
-            slippage_bps: run_args.slippage_bps,
-        }
-    }
-}
-
-impl From<RunArgs> for JupiterQuoteArgs {
-    fn from(run_args: RunArgs) -> Self {
-        Self {
-            input_mint: run_args.input_mint,
-            output_mint: run_args.output_mint,
-            amount: run_args.amount,
-            slippage_bps: run_args.slippage_bps,
         }
     }
 }

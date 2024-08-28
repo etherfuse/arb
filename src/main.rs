@@ -1,8 +1,10 @@
 mod args;
+mod constants;
 mod etherfuse;
 mod field_as_string;
 mod jito;
 mod jupiter;
+mod math;
 mod purchase;
 mod run;
 mod transaction;
@@ -18,6 +20,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     signature::{read_keypair_file, Keypair},
 };
+
 use std::{sync::Arc, sync::RwLock};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
@@ -28,6 +31,7 @@ struct Arber {
     pub jupiter_quote_url: Option<String>,
     pub jito_client: HttpClient,
     pub jito_tip: Arc<std::sync::RwLock<u64>>,
+    pub usdc_balance: Arc<std::sync::RwLock<f64>>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -128,6 +132,7 @@ async fn main() -> Result<()> {
     let rpc_client = RpcClient::new_with_commitment(cluster, CommitmentConfig::confirmed());
     let tip = Arc::new(RwLock::new(0_u64));
     let tip_clone = Arc::clone(&tip);
+    let usdc_balance = Arc::new(RwLock::new(0_f64));
 
     let url = "ws://bundles-api-rest.jito.wtf/api/v1/bundles/tip_stream";
     let (ws_stream, _) = connect_async(url).await.unwrap();
@@ -157,6 +162,7 @@ async fn main() -> Result<()> {
         args.jupiter_quote_url,
         jito_client,
         tip,
+        usdc_balance,
     );
 
     //if the command is test arb and the tip is still 0, we wait until its not
@@ -190,6 +196,7 @@ impl Arber {
         jupiter_quote_url: Option<String>,
         jito_client: HttpClient,
         jito_tip: Arc<std::sync::RwLock<u64>>,
+        usdc_balance: Arc<std::sync::RwLock<f64>>,
     ) -> Self {
         Self {
             rpc_client,
@@ -198,6 +205,7 @@ impl Arber {
             jupiter_quote_url,
             jito_client,
             jito_tip,
+            usdc_balance,
         }
     }
 
