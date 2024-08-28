@@ -25,7 +25,8 @@ impl Arber {
         // get etherfuse price of token
         let stablebond_price_to_usd = self.get_etherfuse_price(args.etherfuse_token).await?;
         let max_usdc_ui_amount_to_purchase = math::checked_float_mul(usdc_balance, 0.99)?;
-        let mut usdc_token_amount = to_token_amount(max_usdc_ui_amount_to_purchase, USDC_DECIMALS);
+        let mut usdc_token_amount =
+            math::to_token_amount(max_usdc_ui_amount_to_purchase, USDC_DECIMALS)?;
 
         let stablebond_ui_amount =
             math::checked_float_div(max_usdc_ui_amount_to_purchase, stablebond_price_to_usd)?;
@@ -92,8 +93,4 @@ impl Arber {
         }
         return Ok(0.0);
     }
-}
-
-pub fn to_token_amount(amount: f64, decimals: u8) -> u64 {
-    (amount * 10u64.pow(decimals as u32) as f64) as u64
 }
