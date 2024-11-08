@@ -6,7 +6,7 @@ use spl_associated_token_account::{
 };
 use stablebond_sdk::{
     accounts::{Bond, PaymentFeed},
-    find_bond_pda, find_config_pda, find_issuance_pda, find_payment_feed_pda, find_payment_pda,
+    find_bond_pda, find_issuance_pda, find_payment_feed_pda, find_payment_pda,
     instructions::{PurchaseBond, PurchaseBondInstructionArgs},
 };
 
@@ -39,7 +39,6 @@ impl Arber {
         }
 
         let ix = PurchaseBond {
-            config_account: find_config_pda().0,
             user_wallet: user_wallet.pubkey(),
             user_token_account: get_associated_token_address_with_program_id(
                 &user_wallet.pubkey(),
@@ -99,7 +98,6 @@ impl Arber {
         }
 
         let ix = PurchaseBond {
-            config_account: find_config_pda().0,
             user_wallet: user_wallet.pubkey(),
             user_token_account: get_associated_token_address_with_program_id(
                 &user_wallet.pubkey(),

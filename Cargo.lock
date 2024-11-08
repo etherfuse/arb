@@ -1434,7 +1434,7 @@ dependencies = [
 
 [[package]]
 name = "etherfuse-arb"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "base58",
@@ -4702,9 +4702,9 @@ dependencies = [
 
 [[package]]
 name = "stablebond-sdk"
-version = "0.3.32"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "038e2d89360532e35b1c5ffd80c07e859a3ff29713965850175368f64f3033fe"
+checksum = "fb2f57f53d47dc894fe19bc6529d41311a9dab566bf3838d877e0dba25daa9cd"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
