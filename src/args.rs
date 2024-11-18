@@ -14,6 +14,18 @@ pub struct PurchaseArgs {
 }
 
 #[derive(Parser, Debug)]
+pub struct InstantBondRedemptionArgs {
+    #[arg(
+        value_name = "AMOUNT",
+        help = "Amount of tokens to mint in token amount"
+    )]
+    pub amount: u64,
+
+    #[arg(value_name = "MINT", help = "Public key of the stablebond mint")]
+    pub mint: Pubkey,
+}
+
+#[derive(Parser, Debug)]
 pub struct EtherfusePriceArgs {
     #[arg(value_name = "MINT", help = "Public key of the stablebond mint")]
     pub mint: Pubkey,

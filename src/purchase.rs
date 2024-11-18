@@ -1,6 +1,6 @@
 use anyhow::Result;
 use solana_program::{pubkey::Pubkey, system_program};
-use solana_sdk::{signer::Signer, transaction::VersionedTransaction};
+use solana_sdk::{instruction::Instruction, signer::Signer, transaction::VersionedTransaction};
 use spl_associated_token_account::{
     get_associated_token_address, get_associated_token_address_with_program_id,
 };
@@ -13,7 +13,7 @@ use stablebond_sdk::{
 use crate::{args::PurchaseArgs, Arber};
 
 impl Arber {
-    pub async fn purchase(&self, args: PurchaseArgs) -> Result<()> {
+    pub async fn purchase_ix(&self, args: PurchaseArgs) -> Result<Instruction> {
         let ix_args = PurchaseBondInstructionArgs {
             amount: args.amount,
         };
@@ -68,6 +68,11 @@ impl Arber {
         }
         .instruction(ix_args);
 
+        Ok(ix)
+    }
+
+    pub async fn purchase(&self, args: PurchaseArgs) -> Result<()> {
+        let ix = self.purchase_ix(args).await?;
         self.sign_and_send_ixs(&[ix]).await?;
         Ok(())
     }

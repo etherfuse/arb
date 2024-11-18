@@ -6,6 +6,7 @@ mod jito;
 mod jupiter;
 mod math;
 mod purchase;
+mod redeem;
 mod run;
 mod transaction;
 
@@ -38,6 +39,9 @@ struct Arber {
 enum Commands {
     #[command(about = "Purchase a bond")]
     Purchase(PurchaseArgs),
+
+    #[command(about = "Instant bond redemption")]
+    InstantBondRedemption(InstantBondRedemptionArgs),
 
     #[command(about = "Get etherfuse price of a bond")]
     GetEtherfusePrice(EtherfusePriceArgs),
@@ -174,6 +178,11 @@ async fn main() -> Result<()> {
 
     match args.command {
         Commands::Purchase(purchase_args) => arber.purchase(purchase_args).await,
+        Commands::InstantBondRedemption(instant_bond_redemption_args) => {
+            arber
+                .instant_bond_redemption(instant_bond_redemption_args)
+                .await
+        }
         Commands::GetEtherfusePrice(etherfuse_price_args) => {
             let price = arber.get_etherfuse_price(etherfuse_price_args.mint).await?;
             println!("Price: {}", price);

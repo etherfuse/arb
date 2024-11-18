@@ -4702,9 +4702,9 @@ dependencies = [
 
 [[package]]
 name = "stablebond-sdk"
-version = "2.0.0"
+version = "2.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb2f57f53d47dc894fe19bc6529d41311a9dab566bf3838d877e0dba25daa9cd"
+checksum = "b6491415ea4e5df81345f84341f21a7cb3a15af623ebbc4b740bf4e6e1d13dad"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
