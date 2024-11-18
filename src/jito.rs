@@ -5,6 +5,7 @@ use base58::ToBase58;
 use jsonrpsee::core::client::ClientT;
 use jsonrpsee::rpc_params;
 use serde::Deserialize;
+use solana_program::native_token::LAMPORTS_PER_SOL;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signer::Signer;
 use solana_sdk::system_instruction;
@@ -21,6 +22,11 @@ impl Arber {
             &self.signer().pubkey(),
             &Pubkey::try_from(tippers[0].to_string().as_str()).unwrap(),
             *self.jito_tip.read().unwrap(),
+        );
+        // print amount in sol not lamports
+        println!(
+            "SOL tip: {:?}",
+            *self.jito_tip.read().unwrap() as f64 / LAMPORTS_PER_SOL as f64
         );
         let tip_tx = self.build_and_sign_tx(&[tip_ix]).await?;
 

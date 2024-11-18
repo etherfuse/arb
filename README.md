@@ -20,6 +20,6 @@ etherfuse-arb --help
 
 ## Example command
 
-```
+```sh
 etherfuse-arb run --keypair ~/.config/solana/id.json CETES7CKqqKQizuSN6iWQwmTeFRjbJR6Vw2XRKfEDR8f
 ```
