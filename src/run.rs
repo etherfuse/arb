@@ -56,7 +56,6 @@ impl Arber {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
-            println!("Checking for arb opportunity");
             self.check_arb(args.clone()).await?;
         }
     }
@@ -117,12 +116,12 @@ impl Arber {
                     "Arb opportunity found: Buy on Jupiter at {:.4} and sell on Etherfuse at {:.4}",
                     jup_buy_price, stablebond_price_to_usd
                 );
-                let swap_tx = self.jupiter_swap_tx(buy_quote).await?;
-                let redemption_args = InstantBondRedemptionArgs {
-                    amount: stablebond_token_amount,
-                    mint: args.etherfuse_token,
-                };
-                println!("redeem args: {:?}", redemption_args);
+                // let swap_tx = self.jupiter_swap_tx(buy_quote).await?;
+                // let redemption_args = InstantBondRedemptionArgs {
+                //     amount: stablebond_token_amount,
+                //     mint: args.etherfuse_token,
+                // };
+                // println!("redeem args: {:?}", redemption_args);
                 break;
             }
 

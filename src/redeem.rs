@@ -1,7 +1,8 @@
+use std::cmp::min;
+
 use anyhow::Result;
 
-//use solana_program::program_pack::Pack;
-//use spl_token::state::Account as TokenAccount;
+use solana_program::program_pack::Pack;
 use solana_sdk::{
     instruction::Instruction, pubkey::Pubkey, signer::Signer, system_program,
     transaction::VersionedTransaction,
@@ -9,6 +10,7 @@ use solana_sdk::{
 use spl_associated_token_account::{
     get_associated_token_address, get_associated_token_address_with_program_id,
 };
+use spl_token::state::Account as TokenAccount;
 
 use stablebond_sdk::{
     accounts::{Bond, PaymentFeed, SellLiquidity},
@@ -23,10 +25,6 @@ impl Arber {
         &self,
         args: InstantBondRedemptionArgs,
     ) -> Result<Instruction> {
-        let ix_args = InstantBondRedemptionInstructionArgs {
-            amount: args.amount,
-        };
-
         let bond_account = find_bond_pda(args.mint).0;
         let data = self.rpc_client.get_account_data(&bond_account).await?;
         let bond = Bond::from_bytes(&data).unwrap();
@@ -54,21 +52,21 @@ impl Arber {
         let sell_liquidity = SellLiquidity::from_bytes(&sell_liuqidity_data).unwrap();
         let sell_liquidity_token_account =
             get_associated_token_address(&sell_liquidity_account, &payment_feed.payment_mint);
-        // let data = self
-        //     .rpc_client
-        //     .get_account_data(&sell_liquidity_token_account)
-        //     .await?;
-        // let sell_liquidity_token_account_account = TokenAccount::unpack(&data).unwrap();
-        // println!(
-        //     "Sell liquidity token account amount: {:?}",
-        //     sell_liquidity_token_account_account.amount
-        // );
-        // println!("Amount: {:?}", args.amount);
-        // if sell_liquidity_token_account_account.amount < args.amount {
-        //     return Err(anyhow::anyhow!(
-        //         "Not enough tokens in sell liquidity account"
-        //     ));
-        //}
+        let data = self
+            .rpc_client
+            .get_account_data(&sell_liquidity_token_account)
+            .await?;
+        let sell_liquidity_token_account_account = TokenAccount::unpack(&data).unwrap();
+        println!(
+            "Sell liquidity token account amount: {:?}",
+            sell_liquidity_token_account_account.amount
+        );
+        let token_amount = min(args.amount, sell_liquidity_token_account_account.amount);
+        println!("Token amount: {:?}", token_amount);
+
+        let ix_args = InstantBondRedemptionInstructionArgs {
+            amount: token_amount,
+        };
 
         let ix = InstantBondRedemption {
             user_wallet: user_wallet.pubkey(),

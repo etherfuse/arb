@@ -13,7 +13,6 @@ mod transaction;
 use anyhow::Result;
 use args::*;
 use clap::{arg, command, Parser, Subcommand};
-use futures::StreamExt;
 use jito::Tip;
 use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
 use solana_client::nonblocking::rpc_client::RpcClient;
@@ -23,7 +22,6 @@ use solana_sdk::{
 };
 
 use std::{sync::Arc, sync::RwLock};
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 struct Arber {
     pub keypair_filepath: Option<String>,
@@ -138,20 +136,22 @@ async fn main() -> Result<()> {
     let tip_clone = Arc::clone(&tip);
     let usdc_balance = Arc::new(RwLock::new(0_f64));
 
-    let url = "ws://bundles-api-rest.jito.wtf/api/v1/bundles/tip_stream";
-    let (ws_stream, _) = connect_async(url).await.unwrap();
-    let (_, mut read) = ws_stream.split();
-
     tokio::spawn(async move {
-        while let Some(message) = read.next().await {
-            if let Ok(Message::Text(text)) = message {
-                if let Ok(tips) = serde_json::from_str::<Vec<Tip>>(&text) {
+        let client = reqwest::Client::new();
+        loop {
+            if let Ok(response) = client
+                .get("https://bundles.jito.wtf/api/v1/bundles/tip_floor")
+                .send()
+                .await
+            {
+                if let Ok(tips) = response.json::<Vec<Tip>>().await {
                     for item in tips {
                         let mut tip = tip_clone.write().unwrap();
                         *tip = (item.ema_landed_tips_50th_percentile * (10_f64).powf(9.0)) as u64;
                     }
                 }
             }
+            tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
         }
     });
 
@@ -172,6 +172,7 @@ async fn main() -> Result<()> {
     //if the command is test arb and the tip is still 0, we wait until its not
     if let Commands::Run(_) = args.command {
         while *arber.jito_tip.read().unwrap() == 0 {
+            println!("Waiting for tip to be set...");
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
     }
