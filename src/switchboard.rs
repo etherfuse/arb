@@ -1,19 +1,38 @@
-use std::str::FromStr;
-
-use crate::TradingEngine;
 use anyhow::{anyhow, Result};
 use solana_program::{
     address_lookup_table::AddressLookupTableAccount, instruction::Instruction, pubkey::Pubkey,
 };
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
     message::{v0::Message, VersionedMessage::V0},
+    signature::{read_keypair_file, Keypair},
     signer::Signer,
     transaction::VersionedTransaction,
 };
+use std::str::FromStr;
+use std::sync::Arc;
 use switchboard_on_demand_client;
 
-impl TradingEngine {
+#[derive(Clone)]
+pub struct SwitchboardClient {
+    pub rpc_client: Arc<RpcClient>,
+    pub keypair_filepath: String,
+}
+
+impl SwitchboardClient {
+    pub fn new(rpc_client: Arc<RpcClient>, keypair_filepath: String) -> Self {
+        Self {
+            rpc_client,
+            keypair_filepath,
+        }
+    }
+
+    fn signer(&self) -> Keypair {
+        read_keypair_file(self.keypair_filepath.clone())
+            .expect(format!("No keypair found at {}", self.keypair_filepath).as_str())
+    }
+
     pub async fn get_update_switchboard_oracle_tx(&self) -> Result<VersionedTransaction> {
         let (update_oracle_ix, lookup_tables) = self
             .fetch_oracle_feed(

@@ -4,58 +4,33 @@ mod etherfuse;
 mod field_as_string;
 mod jito;
 mod jupiter;
+mod market_data;
 mod math;
-mod purchase;
 mod rate_limiter;
-mod redeem;
+mod strategy;
 mod switchboard;
 mod trading_engine;
 mod traits;
 mod transaction;
 
+use crate::{
+    etherfuse::EtherfuseClient, jito::JitoClient, jupiter::JupiterClient,
+    switchboard::SwitchboardClient, trading_engine::TradingEngine,
+};
 use anyhow::Result;
 use args::*;
-use clap::{arg, command, Parser, Subcommand};
-use jito::Tip;
+use clap::{arg, command, Parser};
 use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
+use market_data::{MarketData, MarketDataBuilder};
+use rate_limiter::RateLimiter;
 use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_program::pubkey::Pubkey;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    signature::{read_keypair_file, Keypair},
+    commitment_config::CommitmentConfig, signature::read_keypair_file, signer::Signer,
 };
-
-use std::{sync::Arc, sync::RwLock};
-
-#[derive(Clone)]
-struct TradingEngine {
-    pub keypair_filepath: Option<String>,
-    pub rpc_client: Arc<RpcClient>,
-    pub etherfuse_url: Option<String>,
-    pub jupiter_quote_url: Option<String>,
-    pub jito_client: HttpClient,
-    pub jito_tip: Arc<std::sync::RwLock<u64>>,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    #[command(about = "Purchase a bond")]
-    Purchase(PurchaseArgs),
-
-    #[command(about = "Instant bond redemption")]
-    InstantBondRedemption(InstantBondRedemptionArgs),
-
-    #[command(about = "Get etherfuse price of a bond")]
-    GetEtherfusePrice(EtherfusePriceArgs),
-
-    #[command(about = "Get jupiter quote")]
-    GetJupiterQuote(JupiterQuoteArgs),
-
-    #[command(about = "Jupiter swap")]
-    JupiterSwap(JupiterSwapArgs),
-
-    #[command(about = "Run the TradingEngine bot")]
-    Run(RunArgs),
-}
+use std::str::FromStr;
+use std::sync::Arc;
+use strategy::{BuyEtherfuseSellJupiter, JupiterSellBuyEtherfuse, StrategyEnum};
 
 #[derive(Parser)]
 #[command(about, version)]
@@ -113,8 +88,13 @@ struct Args {
     )]
     jito_bundles_url: Option<String>,
 
-    #[command(subcommand)]
-    command: Commands,
+    #[arg(
+        long,
+        value_name = "STABLEBOND_MINT",
+        help = "The stablebond mint",
+        global = true
+    )]
+    stablebond_mint: Option<String>,
 }
 
 #[tokio::main]
@@ -132,79 +112,85 @@ async fn main() -> Result<()> {
         solana_cli_config::Config::default()
     };
 
-    let cluster = args.rpc.unwrap_or(cli_config.json_rpc_url);
-    let default_keypair = args.keypair.unwrap_or(cli_config.keypair_path.clone());
-    let rpc_client = RpcClient::new_with_commitment(cluster, CommitmentConfig::confirmed());
-    let tip = Arc::new(RwLock::new(0_u64));
-    let tip_clone = Arc::clone(&tip);
-    tokio::spawn(async move {
-        let client = reqwest::Client::new();
-        loop {
-            if let Ok(response) = client
-                .get("https://bundles.jito.wtf/api/v1/bundles/tip_floor")
-                .send()
-                .await
-            {
-                if let Ok(tips) = response.json::<Vec<Tip>>().await {
-                    for item in tips {
-                        let mut tip = tip_clone.write().unwrap();
-                        *tip = (item.ema_landed_tips_50th_percentile * (10_f64).powf(9.0)) as u64;
-                    }
-                }
-            }
-            if *tip_clone.read().unwrap() > 0 {
-                tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-            } else {
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-            }
-        }
-    });
+    let keypair_filepath = args.keypair.unwrap_or(cli_config.keypair_path.clone());
+    let wallet_keypair =
+        read_keypair_file(keypair_filepath.clone()).expect("Error reading keypair file");
+    let rpc_client = Arc::new(RpcClient::new_with_commitment(
+        args.rpc.unwrap(),
+        CommitmentConfig::confirmed(),
+    ));
 
-    let jito_client: HttpClient = HttpClientBuilder::default()
+    let jito_jsonrpc_client: HttpClient = HttpClientBuilder::default()
         .build(args.jito_bundles_url.clone().unwrap())
         .expect("Error");
-
-    let mut TradingEngine = TradingEngine::new(
-        Arc::new(rpc_client),
-        Some(default_keypair),
-        args.etherfuse_url,
-        args.jupiter_quote_url,
-        jito_client,
-        tip,
+    let jito_client = JitoClient::new(
+        rpc_client.clone(),
+        jito_jsonrpc_client,
+        keypair_filepath.clone(),
     );
 
-    match args.command {
-        Commands::Purchase(purchase_args) => TradingEngine.purchase(purchase_args).await,
-        Commands::InstantBondRedemption(instant_bond_redemption_args) => {
-            TradingEngine
-                .instant_bond_redemption(instant_bond_redemption_args)
-                .await
-        }
-        Commands::GetEtherfusePrice(etherfuse_price_args) => {
-            let price = TradingEngine
-                .get_etherfuse_price(etherfuse_price_args.mint)
-                .await?;
-            println!("Price: {}", price);
-            Ok(())
-        }
-        Commands::GetJupiterQuote(jupiter_quote_args) => {
-            let _ = TradingEngine.get_jupiter_quote(jupiter_quote_args).await;
-            Ok(())
-        }
-        Commands::JupiterSwap(jupiter_swap_args) => {
-            TradingEngine.jupiter_swap(jupiter_swap_args).await
-        }
-        Commands::Run(run_args) => {
-            let mut time_elapsed = 0;
-            while *TradingEngine.jito_tip.read().unwrap() == 0 {
-                println!(
-                    "Waiting for tip to be set... Time elapsed: {}s",
-                    time_elapsed
-                );
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                time_elapsed += 5;
-            }
-            TradingEngine.run(run_args).await
-        }
-    }
+    let etherfuse_client = EtherfuseClient::new(
+        rpc_client.clone(),
+        keypair_filepath.clone(),
+        args.etherfuse_url.clone().unwrap(),
+    );
+
+    let jupiter_client = JupiterClient::new(
+        args.jupiter_quote_url.clone().unwrap(),
+        keypair_filepath.clone(),
+    );
+
+    let switchboard_client = SwitchboardClient::new(rpc_client.clone(), keypair_filepath.clone());
+
+    let rate_limiter = RateLimiter::new(10, 10);
+
+    let stablebond_mint = Pubkey::from_str(&args.stablebond_mint.unwrap()).unwrap();
+
+    let market_data: MarketData = MarketDataBuilder::new(
+        rpc_client.clone(),
+        wallet_keypair.pubkey(),
+        etherfuse_client.clone(),
+        jito_client,
+    )
+    .with_etherfuse_price_per_token(&stablebond_mint)
+    .await
+    .with_sell_liquidity_usdc_amount(&stablebond_mint)
+    .await
+    .with_stablebond_holdings_token_amount(&stablebond_mint)
+    .await
+    .with_usdc_holdings_token_amount()
+    .await
+    .with_jito_tip()
+    .await
+    .build();
+
+    let buy_etherfuse_sell_jupiter = BuyEtherfuseSellJupiter::new(
+        rpc_client.clone(),
+        jupiter_client.clone(),
+        keypair_filepath.clone(),
+        rate_limiter.clone(),
+        switchboard_client.clone(),
+        etherfuse_client.clone(),
+    );
+
+    let jupiter_sell_buy_etherfuse = JupiterSellBuyEtherfuse::new(
+        rpc_client.clone(),
+        jupiter_client.clone(),
+        keypair_filepath.clone(),
+        rate_limiter.clone(),
+        switchboard_client.clone(),
+        etherfuse_client.clone(),
+    );
+
+    TradingEngine::new()
+        .add_strategy(StrategyEnum::BuyEtherfuseSellJupiter(
+            buy_etherfuse_sell_jupiter,
+        ))
+        .add_strategy(StrategyEnum::JupiterSellBuyEtherfuse(
+            jupiter_sell_buy_etherfuse,
+        ))
+        .run_strategies(&market_data, &stablebond_mint)
+        .await;
+
+    Ok(())
 }
