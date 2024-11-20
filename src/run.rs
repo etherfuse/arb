@@ -14,7 +14,7 @@ use spl_associated_token_account::{
     get_associated_token_address, get_associated_token_address_with_program_id,
 };
 use spl_token_2022::ID as SPL_TOKEN_2022_PROGRAM_ID;
-use stablebond_sdk::{find_bond_pda, find_sell_liquidity_pda};
+use stablebond_sdk::find_bond_pda;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ impl Arber {
     }
 
     async fn check_arb(&mut self, args: RunArgs) -> Result<()> {
-        let price_per_token_on_etherfuse = self.get_etherfuse_price(args.etherfuse_token).await?;
+        let etherfuse_price_per_token = self.get_etherfuse_price(args.etherfuse_token).await?;
         let stablebond_holdings_token_amount =
             self.get_spl_token_22_balance(args.etherfuse_token).await?;
         let usdc_holdings_token_amount = self
@@ -40,7 +40,7 @@ impl Arber {
         let rate_limiter = RateLimiter::new(10, 10);
 
         let best_strategy = ArbitrageEngine::new(
-            price_per_token_on_etherfuse,
+            etherfuse_price_per_token,
             sell_liquidity_usdc_amount,
             stablebond_holdings_token_amount,
             usdc_holdings_token_amount,
@@ -184,6 +184,12 @@ impl ArbitrageEngine {
         &mut self,
         args: RunArgs,
     ) -> Result<StrategyResult> {
+        if self.sell_liquidity_usdc_amount == 0 {
+            return Ok(StrategyResult {
+                profit: 0.0,
+                txs: Vec::new(),
+            });
+        }
         let stablebond_holdings_in_usdc_ui_amount = math::checked_float_mul(
             self.stablebond_holdings_token_amount
                 .to_ui_amount(STABLEBOND_DECIMALS),
@@ -195,29 +201,31 @@ impl ArbitrageEngine {
             .to_ui_amount(USDC_DECIMALS)
             .min(stablebond_holdings_in_usdc_ui_amount);
 
-        let mut max_usdc_token_amount_to_redeem =
+        let max_usdc_token_amount_to_redeem =
             math::to_token_amount(max_usdc_ui_amount_to_redeem, USDC_DECIMALS)?;
 
-        let max_stablebond_ui_amount_to_redeem =
-            math::checked_float_div(max_usdc_ui_amount_to_redeem, self.etherfuse_price_per_token)?;
+        // let max_stablebond_ui_amount_to_redeem =
+        //     math::checked_float_div(max_usdc_ui_amount_to_redeem, self.etherfuse_price_per_token)?;
 
-        let mut max_stablebond_token_amount_to_redeem =
-            math::to_token_amount(max_stablebond_ui_amount_to_redeem, STABLEBOND_DECIMALS)?;
+        // let mut max_stablebond_token_amount_to_redeem =
+        //     math::to_token_amount(max_stablebond_ui_amount_to_redeem, STABLEBOND_DECIMALS)?;
 
         let mut best_profit = 0.0;
         let mut best_usdc_amount = 0;
         let mut best_stablebond_amount = 0;
         let mut best_quote: Option<Quote> = None;
 
-        while max_usdc_token_amount_to_redeem > MIN_USDC_AMOUNT {
+        let mut left = MIN_USDC_AMOUNT;
+        let mut right = max_usdc_token_amount_to_redeem;
+
+        while left <= right {
+            let mid_usdc = left + (right - left) / 2;
+            let mid_stablebond = (mid_usdc as f64 / self.etherfuse_price_per_token) as u64;
+
             self.rate_limiter.wait_if_needed().await;
 
-            let (price_per_token_when_buying, buy_quote) = loop {
-                match self
-                    .arber
-                    .buy_quote(args.clone(), max_usdc_token_amount_to_redeem)
-                    .await
-                {
+            let (price_when_buying, buy_quote) = loop {
+                match self.arber.buy_quote(args.clone(), mid_usdc).await {
                     Ok(quote) => break quote,
                     Err(e) => {
                         println!("Error getting buy quote, retrying: {}", e);
@@ -226,21 +234,21 @@ impl ArbitrageEngine {
                 }
             };
 
-            let potential_profit_usdc = math::profit_from_arb(
-                price_per_token_when_buying,
+            let potential_profit = math::profit_from_arb(
+                price_when_buying,
                 self.etherfuse_price_per_token,
-                max_stablebond_token_amount_to_redeem.to_ui_amount(STABLEBOND_DECIMALS),
+                mid_stablebond.to_ui_amount(STABLEBOND_DECIMALS),
             )?;
-            if potential_profit_usdc > best_profit {
-                best_profit = potential_profit_usdc;
-                best_usdc_amount = max_usdc_token_amount_to_redeem;
-                best_stablebond_amount = max_stablebond_token_amount_to_redeem;
+
+            if potential_profit > best_profit {
+                best_profit = potential_profit;
+                best_usdc_amount = mid_usdc;
+                best_stablebond_amount = mid_stablebond;
                 best_quote = Some(buy_quote);
+                left = mid_usdc + 1;
+            } else {
+                right = mid_usdc - 1;
             }
-            max_stablebond_token_amount_to_redeem =
-                (max_stablebond_token_amount_to_redeem as f64 * 0.80) as u64;
-            max_usdc_token_amount_to_redeem =
-                (max_usdc_token_amount_to_redeem as f64 * 0.80) as u64;
         }
         println!(
             "Jupiter Buy -> Etherfuse Sell\nUSDC Amount: {}\nStablebond Amount: {}\nProfit: {}",
@@ -279,31 +287,33 @@ impl ArbitrageEngine {
             self.usdc_holdings_token_amount.to_ui_amount(USDC_DECIMALS),
             0.99,
         )?;
-        let mut max_usdc_token_amount_to_purchase =
+        let max_usdc_token_amount_to_purchase =
             max_usdc_ui_amount_to_purchase.to_token_amount(USDC_DECIMALS);
 
-        let stablebond_ui_amount_to_sell = math::checked_float_div(
-            max_usdc_ui_amount_to_purchase,
-            self.etherfuse_price_per_token,
-        )?;
+        // let stablebond_ui_amount_to_sell = math::checked_float_div(
+        //     max_usdc_ui_amount_to_purchase,
+        //     self.etherfuse_price_per_token,
+        // )?;
 
-        let mut stablebond_token_amount_to_sell =
-            stablebond_ui_amount_to_sell.to_token_amount(STABLEBOND_DECIMALS);
+        // let stablebond_token_amount_to_sell =
+        //     stablebond_ui_amount_to_sell.to_token_amount(STABLEBOND_DECIMALS);
 
         let mut best_profit = 0.0;
         let mut best_usdc_amount = 0;
         let mut best_stablebond_amount = 0;
         let mut best_quote: Option<Quote> = None;
 
-        while max_usdc_token_amount_to_purchase > MIN_USDC_AMOUNT {
+        let mut left = MIN_USDC_AMOUNT;
+        let mut right = max_usdc_token_amount_to_purchase;
+
+        while left <= right {
+            let mid_usdc = left + (right - left) / 2;
+            let mid_stablebond = (mid_usdc as f64 / self.etherfuse_price_per_token) as u64;
+
             self.rate_limiter.wait_if_needed().await;
 
             let (price_per_token_when_selling, sell_quote) = loop {
-                match self
-                    .arber
-                    .sell_quote(args.clone(), stablebond_token_amount_to_sell)
-                    .await
-                {
+                match self.arber.sell_quote(args.clone(), mid_stablebond).await {
                     Ok(quote) => break quote,
                     Err(e) => {
                         println!("Error getting sell quote, retrying: {}", e);
@@ -311,23 +321,22 @@ impl ArbitrageEngine {
                     }
                 }
             };
-            let potential_profit_usdc = math::profit_from_arb(
+
+            let potential_profit = math::profit_from_arb(
                 price_per_token_when_selling,
                 self.etherfuse_price_per_token,
-                stablebond_token_amount_to_sell.to_ui_amount(STABLEBOND_DECIMALS),
+                mid_stablebond.to_ui_amount(STABLEBOND_DECIMALS),
             )?;
 
-            if potential_profit_usdc > best_profit {
-                best_profit = potential_profit_usdc;
-                best_usdc_amount = max_usdc_token_amount_to_purchase;
-                best_stablebond_amount = stablebond_token_amount_to_sell;
+            if potential_profit > best_profit {
+                best_profit = potential_profit;
+                best_usdc_amount = mid_usdc;
+                best_stablebond_amount = mid_stablebond;
                 best_quote = Some(sell_quote);
+                left = mid_usdc + 1;
+            } else {
+                right = mid_usdc - 1;
             }
-
-            max_usdc_token_amount_to_purchase =
-                (max_usdc_token_amount_to_purchase as f64 * 0.80) as u64;
-            stablebond_token_amount_to_sell =
-                (stablebond_token_amount_to_sell as f64 * 0.80) as u64;
         }
 
         println!(

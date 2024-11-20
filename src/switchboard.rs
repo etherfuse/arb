@@ -11,7 +11,6 @@ use solana_sdk::{
     signer::Signer,
     transaction::VersionedTransaction,
 };
-use stablebond_sdk::accounts::PaymentFeed;
 use switchboard_on_demand_client;
 
 impl Arber {
