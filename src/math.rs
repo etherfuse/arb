@@ -104,3 +104,13 @@ pub fn to_token_amount(ui_amount: f64, decimals: u8) -> Result<u64> {
         checked_powi(10.0, decimals as i32)?,
     )?)
 }
+
+pub fn profit_from_arb(
+    high_price_per_token: f64,
+    low_price_per_token: f64,
+    token_amount: f64,
+) -> Result<f64> {
+    let delta = high_price_per_token - low_price_per_token;
+    let profit = checked_float_mul(token_amount, delta)?;
+    Ok(profit)
+}

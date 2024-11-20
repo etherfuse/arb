@@ -11,6 +11,37 @@ use solana_sdk::signer::Signer;
 use solana_sdk::system_instruction;
 use solana_sdk::transaction::VersionedTransaction;
 
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct BundleStatus {
+    bundle_id: String,
+    status: String,
+    landed_slot: Option<u64>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct BundleStatusResponse {
+    context: Context,
+    value: Vec<BundleStatus>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct Context {
+    slot: u64,
+}
+
+#[allow(dead_code)]
+enum BundleStatusEnum {
+    Landed,
+    Failed,
+    Pending,
+    Invalid,
+    Unknown,
+    Timeout,
+}
+
 impl Arber {
     pub async fn send_bundle(&self, txs: &[VersionedTransaction]) -> Result<()> {
         let tippers: Vec<String> = self
@@ -41,12 +72,58 @@ impl Arber {
         match resp {
             Ok(bundle) => {
                 println!("https://explorer.jito.wtf/bundle/{bundle}");
+                match self.check_bundle_status(&bundle).await {
+                    Ok(BundleStatusEnum::Landed) => println!("Bundle landed successfully"),
+                    Ok(BundleStatusEnum::Failed) => println!("Bundle failed to land"),
+                    Ok(BundleStatusEnum::Invalid) => println!("Bundle invalid"),
+                    Ok(BundleStatusEnum::Pending) => println!("Bundle pending"),
+                    Ok(BundleStatusEnum::Unknown) => println!("Bundle unknown"),
+                    Ok(BundleStatusEnum::Timeout) => println!("Bundle timeout"),
+                    Err(e) => eprintln!("Error checking bundle status: {:?}", e),
+                }
             }
             Err(err) => {
                 eprintln!("Error: {:?}", err);
             }
         }
         Ok(())
+    }
+
+    async fn check_bundle_status(&self, bundle_id: &str) -> Result<BundleStatusEnum> {
+        let start_time = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(30);
+
+        while start_time.elapsed() < timeout {
+            let params = rpc_params![[bundle_id]];
+            let response: Option<BundleStatusResponse> = self
+                .jito_client
+                .request("getInflightBundleStatuses", params)
+                .await?;
+
+            if let Some(resp) = response {
+                if let Some(status) = resp.value.first() {
+                    match status.status.as_str() {
+                        "Landed" => return Ok(BundleStatusEnum::Landed),
+                        "Failed" => return Ok(BundleStatusEnum::Failed),
+                        "Pending" | "Invalid" => {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                            if start_time.elapsed() >= timeout {
+                                return Ok(BundleStatusEnum::Timeout);
+                            }
+                            continue;
+                        }
+                        _ => {
+                            eprintln!("Unknown status: {}", status.status);
+                            return Ok(BundleStatusEnum::Unknown);
+                        }
+                    }
+                }
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }
+
+        Ok(BundleStatusEnum::Timeout)
     }
 }
 

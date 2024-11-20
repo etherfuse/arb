@@ -16,7 +16,7 @@ impl Arber {
     }
 
     pub async fn build_and_sign_tx(&self, ixs: &[Instruction]) -> Result<VersionedTransaction> {
-        let priority_fee_ix = ComputeBudgetInstruction::set_compute_unit_price(200000);
+        let priority_fee_ix = ComputeBudgetInstruction::set_compute_unit_price(100000);
         let mut ixs_with_priority = vec![priority_fee_ix];
         ixs_with_priority.extend_from_slice(ixs);
         let recent_blockhash = self.rpc_client.get_latest_blockhash().await?;

@@ -36,7 +36,6 @@ impl Arber {
             .await?;
         let payment_feed = PaymentFeed::from_bytes(&data).unwrap();
         let user_wallet = self.signer();
-        println!("Signer: {:?}", user_wallet.pubkey());
         let issuance_account = find_issuance_pda(bond_account, bond.issuance_number).0;
         let payment_mint_account = payment_feed.payment_mint;
         let mut payment_quote_price_feed_account = None;
@@ -57,12 +56,7 @@ impl Arber {
             .get_account_data(&sell_liquidity_token_account)
             .await?;
         let sell_liquidity_token_account_account = TokenAccount::unpack(&data).unwrap();
-        println!(
-            "Sell liquidity token account amount: {:?}",
-            sell_liquidity_token_account_account.amount
-        );
         let token_amount = min(args.amount, sell_liquidity_token_account_account.amount);
-        println!("Token amount: {:?}", token_amount);
 
         let ix_args = InstantBondRedemptionInstructionArgs {
             amount: token_amount,

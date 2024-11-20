@@ -6,8 +6,10 @@ mod jito;
 mod jupiter;
 mod math;
 mod purchase;
+mod rate_limiter;
 mod redeem;
 mod run;
+mod switchboard;
 mod transaction;
 
 use anyhow::Result;
@@ -23,6 +25,7 @@ use solana_sdk::{
 
 use std::{sync::Arc, sync::RwLock};
 
+#[derive(Clone)]
 struct Arber {
     pub keypair_filepath: Option<String>,
     pub rpc_client: Arc<RpcClient>,
@@ -30,7 +33,6 @@ struct Arber {
     pub jupiter_quote_url: Option<String>,
     pub jito_client: HttpClient,
     pub jito_tip: Arc<std::sync::RwLock<u64>>,
-    pub usdc_balance: Arc<std::sync::RwLock<f64>>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -105,7 +107,7 @@ struct Args {
         long,
         value_name = "JITO_BUNDLES_URL",
         help = "URL to the Jito Bundles API",
-        default_value = "https://mainnet.block-engine.jito.wtf/api/v1/bundles",
+        default_value = "https://slc.mainnet.block-engine.jito.wtf:443/api/v1/bundles",
         global = true
     )]
     jito_bundles_url: Option<String>,
@@ -134,8 +136,6 @@ async fn main() -> Result<()> {
     let rpc_client = RpcClient::new_with_commitment(cluster, CommitmentConfig::confirmed());
     let tip = Arc::new(RwLock::new(0_u64));
     let tip_clone = Arc::clone(&tip);
-    let usdc_balance = Arc::new(RwLock::new(0_f64));
-
     tokio::spawn(async move {
         let client = reqwest::Client::new();
         loop {
@@ -151,7 +151,11 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+            if *tip_clone.read().unwrap() > 0 {
+                tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+            } else {
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            }
         }
     });
 
@@ -159,23 +163,14 @@ async fn main() -> Result<()> {
         .build(args.jito_bundles_url.clone().unwrap())
         .expect("Error");
 
-    let arber = Arber::new(
+    let mut arber = Arber::new(
         Arc::new(rpc_client),
         Some(default_keypair),
         args.etherfuse_url,
         args.jupiter_quote_url,
         jito_client,
         tip,
-        usdc_balance,
     );
-
-    //if the command is test arb and the tip is still 0, we wait until its not
-    if let Commands::Run(_) = args.command {
-        while *arber.jito_tip.read().unwrap() == 0 {
-            println!("Waiting for tip to be set...");
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        }
-    }
 
     match args.command {
         Commands::Purchase(purchase_args) => arber.purchase(purchase_args).await,
@@ -194,7 +189,18 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Commands::JupiterSwap(jupiter_swap_args) => arber.jupiter_swap(jupiter_swap_args).await,
-        Commands::Run(run_args) => arber.run(run_args).await,
+        Commands::Run(run_args) => {
+            let mut time_elapsed = 0;
+            while *arber.jito_tip.read().unwrap() == 0 {
+                println!(
+                    "Waiting for tip to be set... Time elapsed: {}s",
+                    time_elapsed
+                );
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                time_elapsed += 5;
+            }
+            arber.run(run_args).await
+        }
     }
 }
 
@@ -206,7 +212,6 @@ impl Arber {
         jupiter_quote_url: Option<String>,
         jito_client: HttpClient,
         jito_tip: Arc<std::sync::RwLock<u64>>,
-        usdc_balance: Arc<std::sync::RwLock<f64>>,
     ) -> Self {
         Self {
             rpc_client,
@@ -215,7 +220,6 @@ impl Arber {
             jupiter_quote_url,
             jito_client,
             jito_tip,
-            usdc_balance,
         }
     }
 
