@@ -16,20 +16,6 @@ use switchboard_on_demand_client;
 
 impl Arber {
     pub async fn get_update_switchboard_oracle_tx(&self) -> Result<VersionedTransaction> {
-        // let payment_feeds = self
-        //     .fetch_payment_feeds()
-        //     .await?
-        //     .into_iter()
-        //     .filter(|payment_feed| {
-        //         payment_feed
-        //             .payment_feed_type
-        //             .to_string()
-        //             .contains("on_demand")
-        //     })
-        //     .collect::<Vec<PaymentFeed>>();
-
-        //        println!("payment_feeds: {:?}", payment_feeds);
-
         let (update_oracle_ix, lookup_tables) = self
             .fetch_oracle_feed(
                 Pubkey::from_str("ByTpJ7pxD86SJqCcpewN7HdNkePrStCED1Gd4h2SJYCa").unwrap(),

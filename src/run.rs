@@ -3,9 +3,11 @@ use crate::constants::{MIN_USDC_AMOUNT, STABLEBOND_DECIMALS, USDC_DECIMALS, USDC
 use crate::jupiter::Quote;
 use crate::math;
 use crate::rate_limiter::RateLimiter;
+use crate::traits::{TokenAmountExt, UiAmountExt};
 use crate::{Arber, InstantBondRedemptionArgs, PurchaseArgs};
 
 use anyhow::Result;
+use itertools::Itertools;
 use solana_account_decoder::parse_token::token_amount_to_ui_amount;
 use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::VersionedTransaction};
 use spl_associated_token_account::{
@@ -27,49 +29,33 @@ impl Arber {
 
     async fn check_arb(&mut self, args: RunArgs) -> Result<()> {
         let price_per_token_on_etherfuse = self.get_etherfuse_price(args.etherfuse_token).await?;
-        let stablebond_token_amount = self.get_spl_token_22_balance(args.etherfuse_token).await?;
-        let usdc_token_amount = self
+        let stablebond_holdings_token_amount =
+            self.get_spl_token_22_balance(args.etherfuse_token).await?;
+        let usdc_holdings_token_amount = self
             .get_spl_token_balance(Pubkey::from_str(USDC_MINT).unwrap())
             .await?;
         let sell_liquidity_usdc_amount = self
             .get_sell_liquidity_usdc_amount(find_bond_pda(args.etherfuse_token).0)
             .await?;
         let rate_limiter = RateLimiter::new(10, 10);
-        let mut market = Market::new(
+
+        let best_strategy = ArbitrageEngine::new(
             price_per_token_on_etherfuse,
             sell_liquidity_usdc_amount,
-            Holdings::new(stablebond_token_amount, usdc_token_amount),
+            stablebond_holdings_token_amount,
+            usdc_holdings_token_amount,
             rate_limiter,
             Arc::new(self.clone()), //TODO: fix this shit
-        );
-        let (buy_sell_profit, buy_sell_txs) = market
-            .check_jupiter_buy_etherfuse_sell_opportunity(args.clone())
-            .await?;
-        let (sell_buy_profit, sell_buy_txs) = market
-            .check_jupiter_sell_etherfuse_buy_opportunity(args.clone())
-            .await?;
+        )
+        .run_strategies(args.clone())
+        .await?
+        .into_iter()
+        .sorted_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap())
+        .next()
+        .unwrap();
 
-        println!("Buy sell profit: {}", buy_sell_profit);
-        println!("Sell buy profit: {}", sell_buy_profit);
+        println!("Best strategy found: {:?}", best_strategy);
 
-        if buy_sell_profit.max(sell_buy_profit) < 1.0 {
-            println!("No profitable opportunities found");
-            return Ok(());
-        }
-
-        if buy_sell_profit > sell_buy_profit {
-            println!(
-                "Found better opportunity: Jupiter Buy -> Etherfuse Sell {}",
-                buy_sell_profit
-            );
-        //            self.send_bundle(&buy_sell_txs).await?;
-        } else {
-            println!(
-                "Found better opportunity: Jupiter Sell -> Etherfuse Buy {}",
-                sell_buy_profit
-            );
-            //            self.send_bundle(&sell_buy_txs).await?;
-        }
         Ok(())
     }
 
@@ -142,74 +128,64 @@ impl Arber {
     }
 }
 
-trait TokenAmountExt {
-    fn to_ui_amount(&self, decimals: u8) -> f64;
+pub struct StrategyResult {
+    pub profit: f64,
+    pub txs: Vec<VersionedTransaction>,
 }
 
-impl TokenAmountExt for u64 {
-    fn to_ui_amount(&self, decimals: u8) -> f64 {
-        token_amount_to_ui_amount(*self, decimals)
-            .ui_amount
-            .unwrap()
+impl std::fmt::Debug for StrategyResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Profit: {}", self.profit)
     }
 }
 
-trait UiAmountExt {
-    fn to_token_amount(&self, decimals: u8) -> u64;
-}
-
-impl UiAmountExt for f64 {
-    fn to_token_amount(&self, decimals: u8) -> u64 {
-        math::to_token_amount(*self, decimals).unwrap()
-    }
-}
-
-pub struct Holdings {
-    pub stablebond_token_amount: u64,
-    pub usdc_token_amount: u64,
-}
-
-impl Holdings {
-    pub fn new(stablebond_token_amount: u64, usdc_token_amount: u64) -> Self {
-        Self {
-            stablebond_token_amount,
-            usdc_token_amount,
-        }
-    }
-}
-
-pub struct Market {
+pub struct ArbitrageEngine {
     pub etherfuse_price_per_token: f64,
     pub sell_liquidity_usdc_amount: u64,
-    pub holdings: Holdings,
+    pub stablebond_holdings_token_amount: u64,
+    pub usdc_holdings_token_amount: u64,
     pub rate_limiter: RateLimiter,
     pub arber: Arc<Arber>,
 }
 
-impl Market {
+impl ArbitrageEngine {
     pub fn new(
         etherfuse_price_per_token: f64,
         sell_liquidity_usdc_amount: u64,
-        holdings: Holdings,
+        stablebond_holdings_token_amount: u64,
+        usdc_holdings_token_amount: u64,
         rate_limiter: RateLimiter,
         arber: Arc<Arber>,
     ) -> Self {
         Self {
             etherfuse_price_per_token,
             sell_liquidity_usdc_amount,
-            holdings,
+            stablebond_holdings_token_amount,
+            usdc_holdings_token_amount,
             rate_limiter,
             arber,
         }
     }
 
+    async fn run_strategies(&mut self, args: RunArgs) -> Result<Vec<StrategyResult>> {
+        let mut results: Vec<StrategyResult> = Vec::new();
+        results.push(
+            self.check_jupiter_buy_etherfuse_sell_opportunity(args.clone())
+                .await?,
+        );
+        results.push(
+            self.check_jupiter_sell_etherfuse_buy_opportunity(args.clone())
+                .await?,
+        );
+        Ok(results)
+    }
+
     async fn check_jupiter_buy_etherfuse_sell_opportunity(
         &mut self,
         args: RunArgs,
-    ) -> Result<(f64, Vec<VersionedTransaction>)> {
+    ) -> Result<StrategyResult> {
         let stablebond_holdings_in_usdc_ui_amount = math::checked_float_mul(
-            self.holdings
-                .stablebond_token_amount
+            self.stablebond_holdings_token_amount
                 .to_ui_amount(STABLEBOND_DECIMALS),
             self.etherfuse_price_per_token,
         )?;
@@ -289,15 +265,18 @@ impl Market {
                 txs.push(redeem_on_etherfuse_tx);
             }
         }
-        return Ok((best_profit, txs));
+        return Ok(StrategyResult {
+            profit: best_profit,
+            txs,
+        });
     }
 
     async fn check_jupiter_sell_etherfuse_buy_opportunity(
         &mut self,
         args: RunArgs,
-    ) -> Result<(f64, Vec<VersionedTransaction>)> {
+    ) -> Result<StrategyResult> {
         let max_usdc_ui_amount_to_purchase = math::checked_float_mul(
-            self.holdings.usdc_token_amount.to_ui_amount(USDC_DECIMALS),
+            self.usdc_holdings_token_amount.to_ui_amount(USDC_DECIMALS),
             0.99,
         )?;
         let mut max_usdc_token_amount_to_purchase =
@@ -372,6 +351,9 @@ impl Market {
                 txs.push(sell_on_jupiter_tx);
             }
         }
-        return Ok((best_profit, txs));
+        return Ok(StrategyResult {
+            profit: best_profit,
+            txs,
+        });
     }
 }

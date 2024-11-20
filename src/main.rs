@@ -10,6 +10,7 @@ mod rate_limiter;
 mod redeem;
 mod run;
 mod switchboard;
+mod traits;
 mod transaction;
 
 use anyhow::Result;
