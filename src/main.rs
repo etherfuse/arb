@@ -30,7 +30,7 @@ use solana_sdk::{
 };
 use std::str::FromStr;
 use std::sync::Arc;
-use strategy::{BuyEtherfuseSellJupiter, JupiterSellBuyEtherfuse, StrategyEnum};
+use strategy::{BuyEtherfuseSellJupiter, JupiterSellBuyEtherfuse, StrategyEnum, StrategyResult};
 
 #[derive(Parser)]
 #[command(about, version)]
@@ -123,7 +123,7 @@ async fn main() -> Result<()> {
     let jito_jsonrpc_client: HttpClient = HttpClientBuilder::default()
         .build(args.jito_bundles_url.clone().unwrap())
         .expect("Error");
-    let jito_client = JitoClient::new(
+    let mut jito_client = JitoClient::new(
         rpc_client.clone(),
         jito_jsonrpc_client,
         keypair_filepath.clone(),
@@ -146,24 +146,6 @@ async fn main() -> Result<()> {
 
     let stablebond_mint = Pubkey::from_str(&args.stablebond_mint.unwrap()).unwrap();
 
-    let market_data: MarketData = MarketDataBuilder::new(
-        rpc_client.clone(),
-        wallet_keypair.pubkey(),
-        etherfuse_client.clone(),
-        jito_client,
-    )
-    .with_etherfuse_price_per_token(&stablebond_mint)
-    .await
-    .with_sell_liquidity_usdc_amount(&stablebond_mint)
-    .await
-    .with_stablebond_holdings_token_amount(&stablebond_mint)
-    .await
-    .with_usdc_holdings_token_amount()
-    .await
-    .with_jito_tip()
-    .await
-    .build();
-
     let buy_etherfuse_sell_jupiter = BuyEtherfuseSellJupiter::new(
         rpc_client.clone(),
         jupiter_client.clone(),
@@ -182,15 +164,48 @@ async fn main() -> Result<()> {
         etherfuse_client.clone(),
     );
 
-    TradingEngine::new()
-        .add_strategy(StrategyEnum::BuyEtherfuseSellJupiter(
-            buy_etherfuse_sell_jupiter,
-        ))
-        .add_strategy(StrategyEnum::JupiterSellBuyEtherfuse(
-            jupiter_sell_buy_etherfuse,
-        ))
-        .run_strategies(&market_data, &stablebond_mint)
-        .await;
+    loop {
+        let market_data: MarketData = MarketDataBuilder::new(
+            rpc_client.clone(),
+            wallet_keypair.pubkey(),
+            etherfuse_client.clone(),
+            jito_client.clone(),
+        )
+        .with_etherfuse_price_per_token(&stablebond_mint)
+        .await
+        .with_sell_liquidity_usdc_amount(&stablebond_mint)
+        .await
+        .with_stablebond_holdings_token_amount(&stablebond_mint)
+        .await
+        .with_usdc_holdings_token_amount()
+        .await
+        .with_jito_tip()
+        .await
+        .build();
 
-    Ok(())
+        let strategies = TradingEngine::new()
+            .add_strategy(StrategyEnum::BuyEtherfuseSellJupiter(
+                buy_etherfuse_sell_jupiter.clone(),
+            ))
+            .add_strategy(StrategyEnum::JupiterSellBuyEtherfuse(
+                jupiter_sell_buy_etherfuse.clone(),
+            ))
+            .run_strategies(&market_data, &stablebond_mint)
+            .await;
+
+        let mut most_profitable_strategy: StrategyResult = strategies[0].clone();
+        for s in strategies {
+            if s.profit > most_profitable_strategy.profit {
+                most_profitable_strategy = s.clone();
+            }
+        }
+
+        println!("Most profitable strategy: {:?}", most_profitable_strategy);
+
+        match jito_client.send_bundle(&most_profitable_strategy.txs).await {
+            Ok(v) => println!("Bundle sent successfully: {:?}", v),
+            Err(e) => println!("Error sending bundle: {:?}", e),
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+    }
 }

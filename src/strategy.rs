@@ -25,6 +25,7 @@ pub trait Strategy {
     ) -> Result<StrategyResult>;
 }
 
+#[derive(Clone)]
 pub struct BuyEtherfuseSellJupiter {
     pub rpc_client: Arc<RpcClient>,
     pub keypair_filepath: String,
@@ -54,6 +55,7 @@ impl BuyEtherfuseSellJupiter {
     }
 }
 
+#[derive(Clone)]
 pub struct JupiterSellBuyEtherfuse {
     pub rpc_client: Arc<RpcClient>,
     pub jupiter_client: JupiterClient,
@@ -285,7 +287,7 @@ impl Strategy for JupiterSellBuyEtherfuse {
         }
 
         println!(
-            "\nJupiter Sell -> Etherfuse Buy\nUSDC Amount: {}\nStablebond Amount: {}\nProfit: {}\n",
+            "\nJupiter Sell -> Etherfuse Buy\nUSDC Amount: {}\nStablebond Amount: {}\nProfit: {}",
             token_amount_to_ui_amount(best_usdc_amount, USDC_DECIMALS).ui_amount_string,
             token_amount_to_ui_amount(best_stablebond_amount, STABLEBOND_DECIMALS).ui_amount_string,
             best_profit
@@ -294,7 +296,7 @@ impl Strategy for JupiterSellBuyEtherfuse {
             amount: best_usdc_amount,
             mint: stablebond_mint.clone(),
         };
-        println!("Purchase args: {:?}", purchase_args);
+        println!("Purchase args: {:?}\n", purchase_args);
         let mut txs: Vec<VersionedTransaction> = Vec::new();
         if let Ok(update_oracle_tx) = self
             .switchboard_client
@@ -320,6 +322,7 @@ impl Strategy for JupiterSellBuyEtherfuse {
     }
 }
 
+#[derive(Clone)]
 pub struct StrategyResult {
     pub profit: f64,
     pub txs: Vec<VersionedTransaction>,

@@ -15,6 +15,7 @@ use solana_sdk::system_instruction;
 use solana_sdk::transaction::VersionedTransaction;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct JitoClient {
     pub rpc_client: Arc<RpcClient>,
     pub keypair_filepath: String,

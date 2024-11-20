@@ -13,7 +13,6 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 use stablebond_sdk::instructions::{InstantBondRedemption, InstantBondRedemptionInstructionArgs};
-use std::cmp::min;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -152,15 +151,8 @@ impl EtherfuseClient {
         let sell_liquidity = SellLiquidity::from_bytes(&sell_liuqidity_data).unwrap();
         let sell_liquidity_token_account =
             get_associated_token_address(&sell_liquidity_account, &payment_feed.payment_mint);
-        let data = self
-            .rpc_client
-            .get_account_data(&sell_liquidity_token_account)
-            .await?;
-        let sell_liquidity_token_account_account = TokenAccount::unpack(&data).unwrap();
-        let token_amount = min(args.amount, sell_liquidity_token_account_account.amount);
-
         let ix_args = InstantBondRedemptionInstructionArgs {
-            amount: token_amount,
+            amount: args.amount,
         };
 
         let ix = InstantBondRedemption {

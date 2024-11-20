@@ -49,7 +49,7 @@ impl SwitchboardClient {
         let msg = Message::try_compile(
             &self.signer().pubkey(),
             &[
-                ComputeBudgetInstruction::set_compute_unit_limit(250_000), //TODO: Update this
+                ComputeBudgetInstruction::set_compute_unit_limit(250_000),
                 ComputeBudgetInstruction::set_compute_unit_price(100000),
                 update_oracle_ix.clone(),
             ],

@@ -1,4 +1,4 @@
-use crate::constants::USDC_MINT;
+use crate::constants::{MAX_STABLEBOND_AMOUNT_PER_TRADE, MAX_USDC_AMOUNT_PER_TRADE, USDC_MINT};
 use crate::etherfuse::EtherfuseClient;
 use crate::{jito::JitoClient, math};
 use anyhow::Result;
@@ -9,6 +9,7 @@ use spl_associated_token_account::{
 };
 use spl_token_2022::ID as SPL_TOKEN_2022_PROGRAM_ID;
 use stablebond_sdk::find_bond_pda;
+use std::cmp::min;
 use std::{str::FromStr, sync::Arc};
 
 pub struct MarketData {
@@ -82,18 +83,21 @@ impl MarketDataBuilder {
     }
 
     pub async fn with_stablebond_holdings_token_amount(mut self, stablebond_mint: &Pubkey) -> Self {
-        self.stablebond_holdings_token_amount = Some(
+        self.stablebond_holdings_token_amount = Some(min(
             self.get_spl_token_22_balance(stablebond_mint)
                 .await
                 .unwrap(),
-        );
+            MAX_STABLEBOND_AMOUNT_PER_TRADE,
+        ));
         self
     }
 
     pub async fn with_usdc_holdings_token_amount(mut self) -> Self {
         let usdc_mint = Pubkey::from_str(&USDC_MINT).unwrap();
-        self.usdc_holdings_token_amount =
-            Some(self.get_spl_token_balance(&usdc_mint).await.unwrap());
+        self.usdc_holdings_token_amount = Some(min(
+            self.get_spl_token_balance(&usdc_mint).await.unwrap(),
+            MAX_USDC_AMOUNT_PER_TRADE,
+        ));
         self
     }
 
