@@ -1,4 +1,4 @@
-use crate::Arber;
+use crate::TradingEngine;
 
 use anyhow::Result;
 use base58::ToBase58;
@@ -42,7 +42,7 @@ enum BundleStatusEnum {
     Timeout,
 }
 
-impl Arber {
+impl TradingEngine {
     pub async fn send_bundle(&self, txs: &[VersionedTransaction]) -> Result<()> {
         let tippers: Vec<String> = self
             .jito_client

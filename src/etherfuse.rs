@@ -1,6 +1,6 @@
 use crate::constants::USDC_MINT;
 use crate::field_as_string;
-use crate::Arber;
+use crate::TradingEngine;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,7 @@ pub struct ExchangeRateResponse {
     #[serde(with = "field_as_string")]
     pub usd_to_mxn: f64,
 }
-impl Arber {
+impl TradingEngine {
     pub async fn get_etherfuse_price(&self, mint: Pubkey) -> Result<f64> {
         let url = format!(
             "{}/lookup/bonds/cost/{:?}",

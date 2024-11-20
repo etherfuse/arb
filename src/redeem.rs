@@ -18,9 +18,9 @@ use stablebond_sdk::{
     instructions::{InstantBondRedemption, InstantBondRedemptionInstructionArgs},
 };
 
-use crate::{args::InstantBondRedemptionArgs, Arber};
+use crate::{args::InstantBondRedemptionArgs, TradingEngine};
 
-impl Arber {
+impl TradingEngine {
     pub async fn instant_bond_redemption_ix(
         &self,
         args: InstantBondRedemptionArgs,

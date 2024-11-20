@@ -1,12 +1,20 @@
+use anyhow::Result;
+use clap::{arg, command, Parser, Subcommand};
+use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
+use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_sdk::{
+    commitment_config::CommitmentConfig,
+    signature::{read_keypair_file, Keypair},
+};
+
 use crate::args::{JupiterQuoteArgs, RunArgs};
 use crate::constants::{MIN_USDC_AMOUNT, STABLEBOND_DECIMALS, USDC_DECIMALS, USDC_MINT};
 use crate::jupiter::Quote;
 use crate::math;
 use crate::rate_limiter::RateLimiter;
 use crate::traits::{TokenAmountExt, UiAmountExt};
-use crate::{Arber, InstantBondRedemptionArgs, PurchaseArgs};
+use crate::{InstantBondRedemptionArgs, PurchaseArgs, TradingEngine};
 
-use anyhow::Result;
 use itertools::Itertools;
 use solana_account_decoder::parse_token::token_amount_to_ui_amount;
 use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::VersionedTransaction};
@@ -18,45 +26,68 @@ use stablebond_sdk::find_bond_pda;
 use std::str::FromStr;
 use std::sync::Arc;
 
-impl Arber {
+impl TradingEngine {
+    pub fn new(
+        rpc_client: Arc<RpcClient>,
+        keypair_filepath: Option<String>,
+        etherfuse_url: Option<String>,
+        jupiter_quote_url: Option<String>,
+        jito_client: HttpClient,
+        jito_tip: Arc<std::sync::RwLock<u64>>,
+    ) -> Self {
+        Self {
+            rpc_client,
+            keypair_filepath,
+            etherfuse_url,
+            jupiter_quote_url,
+            jito_client,
+            jito_tip,
+        }
+    }
+
+    pub fn signer(&self) -> Keypair {
+        match self.keypair_filepath.clone() {
+            Some(filepath) => read_keypair_file(filepath.clone())
+                .expect(format!("No keypair found at {}", filepath).as_str()),
+            None => panic!("No keypair provided"),
+        }
+    }
+}
+
+impl TradingEngine {
     pub async fn run(&mut self, args: RunArgs) -> Result<()> {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60 * 2));
         loop {
             interval.tick().await;
-            self.check_arb(args.clone()).await?;
+
+            let etherfuse_price_per_token = self.get_etherfuse_price(args.etherfuse_token).await?;
+            let stablebond_holdings_token_amount =
+                self.get_spl_token_22_balance(args.etherfuse_token).await?;
+            let usdc_holdings_token_amount = self
+                .get_spl_token_balance(Pubkey::from_str(USDC_MINT).unwrap())
+                .await?;
+            let sell_liquidity_usdc_amount = self
+                .get_sell_liquidity_usdc_amount(find_bond_pda(args.etherfuse_token).0)
+                .await?;
+            let rate_limiter = RateLimiter::new(10, 10);
+
+            let best_strategy = Strategy::new(
+                etherfuse_price_per_token,
+                sell_liquidity_usdc_amount,
+                stablebond_holdings_token_amount,
+                usdc_holdings_token_amount,
+                rate_limiter,
+                Arc::new(self.clone()), //TODO: fix this shit
+            )
+            .run_strategies(args.clone())
+            .await?
+            .into_iter()
+            .sorted_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap())
+            .next()
+            .unwrap();
+
+            println!("Best strategy found: {:?}", best_strategy);
         }
-    }
-
-    async fn check_arb(&mut self, args: RunArgs) -> Result<()> {
-        let etherfuse_price_per_token = self.get_etherfuse_price(args.etherfuse_token).await?;
-        let stablebond_holdings_token_amount =
-            self.get_spl_token_22_balance(args.etherfuse_token).await?;
-        let usdc_holdings_token_amount = self
-            .get_spl_token_balance(Pubkey::from_str(USDC_MINT).unwrap())
-            .await?;
-        let sell_liquidity_usdc_amount = self
-            .get_sell_liquidity_usdc_amount(find_bond_pda(args.etherfuse_token).0)
-            .await?;
-        let rate_limiter = RateLimiter::new(10, 10);
-
-        let best_strategy = ArbitrageEngine::new(
-            etherfuse_price_per_token,
-            sell_liquidity_usdc_amount,
-            stablebond_holdings_token_amount,
-            usdc_holdings_token_amount,
-            rate_limiter,
-            Arc::new(self.clone()), //TODO: fix this shit
-        )
-        .run_strategies(args.clone())
-        .await?
-        .into_iter()
-        .sorted_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap())
-        .next()
-        .unwrap();
-
-        println!("Best strategy found: {:?}", best_strategy);
-
-        Ok(())
     }
 
     async fn sell_quote(&self, args: RunArgs, amount: u64) -> Result<(f64, Quote)> {
@@ -139,23 +170,23 @@ impl std::fmt::Debug for StrategyResult {
     }
 }
 
-pub struct ArbitrageEngine {
+pub struct Strategy {
     pub etherfuse_price_per_token: f64,
     pub sell_liquidity_usdc_amount: u64,
     pub stablebond_holdings_token_amount: u64,
     pub usdc_holdings_token_amount: u64,
     pub rate_limiter: RateLimiter,
-    pub arber: Arc<Arber>,
+    pub TradingEngine: Arc<TradingEngine>,
 }
 
-impl ArbitrageEngine {
+impl Strategy {
     pub fn new(
         etherfuse_price_per_token: f64,
         sell_liquidity_usdc_amount: u64,
         stablebond_holdings_token_amount: u64,
         usdc_holdings_token_amount: u64,
         rate_limiter: RateLimiter,
-        arber: Arc<Arber>,
+        TradingEngine: Arc<TradingEngine>,
     ) -> Self {
         Self {
             etherfuse_price_per_token,
@@ -163,7 +194,7 @@ impl ArbitrageEngine {
             stablebond_holdings_token_amount,
             usdc_holdings_token_amount,
             rate_limiter,
-            arber,
+            TradingEngine,
         }
     }
 
@@ -225,7 +256,7 @@ impl ArbitrageEngine {
             self.rate_limiter.wait_if_needed().await;
 
             let (price_when_buying, buy_quote) = loop {
-                match self.arber.buy_quote(args.clone(), mid_usdc).await {
+                match self.TradingEngine.buy_quote(args.clone(), mid_usdc).await {
                     Ok(quote) => break quote,
                     Err(e) => {
                         println!("Error getting buy quote, retrying: {}", e);
@@ -262,12 +293,18 @@ impl ArbitrageEngine {
         };
         println!("Redemption args: {:?}", redemption_args);
         let mut txs: Vec<VersionedTransaction> = Vec::new();
-        if let Ok(update_oracle_tx) = self.arber.get_update_switchboard_oracle_tx().await {
+        if let Ok(update_oracle_tx) = self.TradingEngine.get_update_switchboard_oracle_tx().await {
             txs.push(update_oracle_tx);
         }
-        if let Ok(buy_on_jupiter_tx) = self.arber.jupiter_swap_tx(best_quote.unwrap()).await {
-            if let Ok(redeem_on_etherfuse_tx) =
-                self.arber.instant_bond_redemption_tx(redemption_args).await
+        if let Ok(buy_on_jupiter_tx) = self
+            .TradingEngine
+            .jupiter_swap_tx(best_quote.unwrap())
+            .await
+        {
+            if let Ok(redeem_on_etherfuse_tx) = self
+                .TradingEngine
+                .instant_bond_redemption_tx(redemption_args)
+                .await
             {
                 txs.push(buy_on_jupiter_tx);
                 txs.push(redeem_on_etherfuse_tx);
@@ -313,7 +350,11 @@ impl ArbitrageEngine {
             self.rate_limiter.wait_if_needed().await;
 
             let (price_per_token_when_selling, sell_quote) = loop {
-                match self.arber.sell_quote(args.clone(), mid_stablebond).await {
+                match self
+                    .TradingEngine
+                    .sell_quote(args.clone(), mid_stablebond)
+                    .await
+                {
                     Ok(quote) => break quote,
                     Err(e) => {
                         println!("Error getting sell quote, retrying: {}", e);
@@ -351,11 +392,15 @@ impl ArbitrageEngine {
         };
         println!("Purchase args: {:?}", purchase_args);
         let mut txs: Vec<VersionedTransaction> = Vec::new();
-        if let Ok(update_oracle_tx) = self.arber.get_update_switchboard_oracle_tx().await {
+        if let Ok(update_oracle_tx) = self.TradingEngine.get_update_switchboard_oracle_tx().await {
             txs.push(update_oracle_tx);
         }
-        if let Ok(buy_on_etherfuse_tx) = self.arber.purchase_tx(purchase_args).await {
-            if let Ok(sell_on_jupiter_tx) = self.arber.jupiter_swap_tx(best_quote.unwrap()).await {
+        if let Ok(buy_on_etherfuse_tx) = self.TradingEngine.purchase_tx(purchase_args).await {
+            if let Ok(sell_on_jupiter_tx) = self
+                .TradingEngine
+                .jupiter_swap_tx(best_quote.unwrap())
+                .await
+            {
                 txs.push(buy_on_etherfuse_tx);
                 txs.push(sell_on_jupiter_tx);
             }

@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use crate::Arber;
+use crate::TradingEngine;
 use anyhow::{anyhow, Result};
 use solana_program::{
     address_lookup_table::AddressLookupTableAccount, instruction::Instruction, pubkey::Pubkey,
@@ -13,7 +13,7 @@ use solana_sdk::{
 };
 use switchboard_on_demand_client;
 
-impl Arber {
+impl TradingEngine {
     pub async fn get_update_switchboard_oracle_tx(&self) -> Result<VersionedTransaction> {
         let (update_oracle_ix, lookup_tables) = self
             .fetch_oracle_feed(

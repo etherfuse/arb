@@ -1,7 +1,7 @@
 use solana_sdk::signer::Signer;
 
 use crate::args::JupiterQuoteArgs;
-use crate::Arber;
+use crate::TradingEngine;
 use crate::{field_as_string, JupiterSwapArgs};
 
 use {
@@ -14,7 +14,7 @@ use {
     std::collections::HashMap,
 };
 
-impl Arber {
+impl TradingEngine {
     pub async fn get_jupiter_quote(&self, args: JupiterQuoteArgs) -> Result<Quote> {
         let url = format!(
             "{}/quote?inputMint={}&outputMint={}&amount={}&slippageBps={}",

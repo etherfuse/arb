@@ -8,8 +8,8 @@ mod math;
 mod purchase;
 mod rate_limiter;
 mod redeem;
-mod run;
 mod switchboard;
+mod trading_engine;
 mod traits;
 mod transaction;
 
@@ -27,7 +27,7 @@ use solana_sdk::{
 use std::{sync::Arc, sync::RwLock};
 
 #[derive(Clone)]
-struct Arber {
+struct TradingEngine {
     pub keypair_filepath: Option<String>,
     pub rpc_client: Arc<RpcClient>,
     pub etherfuse_url: Option<String>,
@@ -53,7 +53,7 @@ enum Commands {
     #[command(about = "Jupiter swap")]
     JupiterSwap(JupiterSwapArgs),
 
-    #[command(about = "Run the arber bot")]
+    #[command(about = "Run the TradingEngine bot")]
     Run(RunArgs),
 }
 
@@ -164,7 +164,7 @@ async fn main() -> Result<()> {
         .build(args.jito_bundles_url.clone().unwrap())
         .expect("Error");
 
-    let mut arber = Arber::new(
+    let mut TradingEngine = TradingEngine::new(
         Arc::new(rpc_client),
         Some(default_keypair),
         args.etherfuse_url,
@@ -174,25 +174,29 @@ async fn main() -> Result<()> {
     );
 
     match args.command {
-        Commands::Purchase(purchase_args) => arber.purchase(purchase_args).await,
+        Commands::Purchase(purchase_args) => TradingEngine.purchase(purchase_args).await,
         Commands::InstantBondRedemption(instant_bond_redemption_args) => {
-            arber
+            TradingEngine
                 .instant_bond_redemption(instant_bond_redemption_args)
                 .await
         }
         Commands::GetEtherfusePrice(etherfuse_price_args) => {
-            let price = arber.get_etherfuse_price(etherfuse_price_args.mint).await?;
+            let price = TradingEngine
+                .get_etherfuse_price(etherfuse_price_args.mint)
+                .await?;
             println!("Price: {}", price);
             Ok(())
         }
         Commands::GetJupiterQuote(jupiter_quote_args) => {
-            let _ = arber.get_jupiter_quote(jupiter_quote_args).await;
+            let _ = TradingEngine.get_jupiter_quote(jupiter_quote_args).await;
             Ok(())
         }
-        Commands::JupiterSwap(jupiter_swap_args) => arber.jupiter_swap(jupiter_swap_args).await,
+        Commands::JupiterSwap(jupiter_swap_args) => {
+            TradingEngine.jupiter_swap(jupiter_swap_args).await
+        }
         Commands::Run(run_args) => {
             let mut time_elapsed = 0;
-            while *arber.jito_tip.read().unwrap() == 0 {
+            while *TradingEngine.jito_tip.read().unwrap() == 0 {
                 println!(
                     "Waiting for tip to be set... Time elapsed: {}s",
                     time_elapsed
@@ -200,35 +204,7 @@ async fn main() -> Result<()> {
                 tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                 time_elapsed += 5;
             }
-            arber.run(run_args).await
-        }
-    }
-}
-
-impl Arber {
-    pub fn new(
-        rpc_client: Arc<RpcClient>,
-        keypair_filepath: Option<String>,
-        etherfuse_url: Option<String>,
-        jupiter_quote_url: Option<String>,
-        jito_client: HttpClient,
-        jito_tip: Arc<std::sync::RwLock<u64>>,
-    ) -> Self {
-        Self {
-            rpc_client,
-            keypair_filepath,
-            etherfuse_url,
-            jupiter_quote_url,
-            jito_client,
-            jito_tip,
-        }
-    }
-
-    pub fn signer(&self) -> Keypair {
-        match self.keypair_filepath.clone() {
-            Some(filepath) => read_keypair_file(filepath.clone())
-                .expect(format!("No keypair found at {}", filepath).as_str()),
-            None => panic!("No keypair provided"),
+            TradingEngine.run(run_args).await
         }
     }
 }

@@ -10,9 +10,9 @@ use stablebond_sdk::{
     instructions::{PurchaseBond, PurchaseBondInstructionArgs},
 };
 
-use crate::{args::PurchaseArgs, Arber};
+use crate::{args::PurchaseArgs, TradingEngine};
 
-impl Arber {
+impl TradingEngine {
     pub async fn purchase_ix(&self, args: PurchaseArgs) -> Result<Instruction> {
         let ix_args = PurchaseBondInstructionArgs {
             amount: args.amount,

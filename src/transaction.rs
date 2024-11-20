@@ -6,9 +6,9 @@ use solana_sdk::{
     transaction::{Transaction, VersionedTransaction},
 };
 
-use crate::Arber;
+use crate::TradingEngine;
 
-impl Arber {
+impl TradingEngine {
     pub fn sign_tx(&self, tx: VersionedTransaction) -> Result<VersionedTransaction> {
         let signed_tx = VersionedTransaction::try_new(tx.message, &[&self.signer()])
             .map_err(|e| anyhow::anyhow!("Failed to create transaction: {}", e))?;
