@@ -164,7 +164,7 @@ impl UiAmountExt for f64 {
     }
 }
 
-struct Holdings {
+pub struct Holdings {
     pub stablebond_token_amount: u64,
     pub usdc_token_amount: u64,
 }
@@ -207,8 +207,6 @@ impl Market {
         &mut self,
         args: RunArgs,
     ) -> Result<(f64, Vec<VersionedTransaction>)> {
-        println!("Checking buy jupiter sell etherfuse opportunity");
-        let bond = find_bond_pda(args.etherfuse_token).0;
         let stablebond_holdings_in_usdc_ui_amount = math::checked_float_mul(
             self.holdings
                 .stablebond_token_amount
@@ -216,28 +214,16 @@ impl Market {
             self.etherfuse_price_per_token,
         )?;
 
-        println!(
-            "Stablebond holdings in USDC: {}",
-            stablebond_holdings_in_usdc_ui_amount
-        );
-
-        println!(
-            "Sell liquidity USDC amount: {}",
-            self.sell_liquidity_usdc_amount.to_ui_amount(USDC_DECIMALS)
-        );
-
-        let mut max_usdc_ui_amount_to_redeem = self
+        let max_usdc_ui_amount_to_redeem = self
             .sell_liquidity_usdc_amount
             .to_ui_amount(USDC_DECIMALS)
             .min(stablebond_holdings_in_usdc_ui_amount);
-
-        println!("Max USDC to redeem: {}", max_usdc_ui_amount_to_redeem);
 
         let mut max_usdc_token_amount_to_redeem =
             math::to_token_amount(max_usdc_ui_amount_to_redeem, USDC_DECIMALS)?;
 
         let max_stablebond_ui_amount_to_redeem =
-            math::checked_float_mul(max_usdc_ui_amount_to_redeem, self.etherfuse_price_per_token)?;
+            math::checked_float_div(max_usdc_ui_amount_to_redeem, self.etherfuse_price_per_token)?;
 
         let mut max_stablebond_token_amount_to_redeem =
             math::to_token_amount(max_stablebond_ui_amount_to_redeem, STABLEBOND_DECIMALS)?;
@@ -276,15 +262,16 @@ impl Market {
                 best_quote = Some(buy_quote);
             }
             max_stablebond_token_amount_to_redeem =
-                (max_stablebond_token_amount_to_redeem as f64 * 0.5) as u64;
-            max_usdc_token_amount_to_redeem = (max_usdc_token_amount_to_redeem as f64 * 0.5) as u64;
+                (max_stablebond_token_amount_to_redeem as f64 * 0.80) as u64;
+            max_usdc_token_amount_to_redeem =
+                (max_usdc_token_amount_to_redeem as f64 * 0.80) as u64;
         }
         println!(
-            "Found best opportunity:\nJupiter Buy -> Etherfuse Sell\nUSDC Amount: {}\nStablebond Amount: {}\nProfit: {}",
+            "Jupiter Buy -> Etherfuse Sell\nUSDC Amount: {}\nStablebond Amount: {}\nProfit: {}",
             token_amount_to_ui_amount(best_usdc_amount, USDC_DECIMALS).ui_amount_string,
             token_amount_to_ui_amount(best_stablebond_amount, STABLEBOND_DECIMALS).ui_amount_string,
             best_profit
-            );
+        );
         let redemption_args = InstantBondRedemptionArgs {
             amount: best_stablebond_amount,
             mint: args.etherfuse_token,
@@ -309,8 +296,6 @@ impl Market {
         &mut self,
         args: RunArgs,
     ) -> Result<(f64, Vec<VersionedTransaction>)> {
-        println!("Checking sell jupiter buy etherfuse strategy");
-
         let max_usdc_ui_amount_to_purchase = math::checked_float_mul(
             self.holdings.usdc_token_amount.to_ui_amount(USDC_DECIMALS),
             0.99,
@@ -361,16 +346,17 @@ impl Market {
             }
 
             max_usdc_token_amount_to_purchase =
-                (max_usdc_token_amount_to_purchase as f64 * 0.5) as u64;
-            stablebond_token_amount_to_sell = (stablebond_token_amount_to_sell as f64 * 0.5) as u64;
+                (max_usdc_token_amount_to_purchase as f64 * 0.80) as u64;
+            stablebond_token_amount_to_sell =
+                (stablebond_token_amount_to_sell as f64 * 0.80) as u64;
         }
 
         println!(
-                "Found best opportunity:\nJupiter Sell -> Etherfuse Buy\nUSDC Amount: {}\nStablebond Amount: {}\nProfit: {}",
-                token_amount_to_ui_amount(best_usdc_amount, USDC_DECIMALS).ui_amount_string,
-                token_amount_to_ui_amount(best_stablebond_amount, STABLEBOND_DECIMALS).ui_amount_string,
-                best_profit
-            );
+            "\nJupiter Sell -> Etherfuse Buy\nUSDC Amount: {}\nStablebond Amount: {}\nProfit: {}\n",
+            token_amount_to_ui_amount(best_usdc_amount, USDC_DECIMALS).ui_amount_string,
+            token_amount_to_ui_amount(best_stablebond_amount, STABLEBOND_DECIMALS).ui_amount_string,
+            best_profit
+        );
         let purchase_args = PurchaseArgs {
             amount: best_usdc_amount,
             mint: args.etherfuse_token,
