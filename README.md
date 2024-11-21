@@ -21,5 +21,5 @@ etherfuse-arb --help
 ## Example command
 
 ```sh
-etherfuse-arb --keypair ~/.config/solana/mainnet/market-maker/id.json --rpc https://api.mainnet-beta.solana.com --stablebond-mint CETES7CKqqKQizuSN6iWQwmTeFRjbJR6Vw2XRKfEDR8f
+etherfuse-arb --keypair ~/.config/solana/id.json --rpc https://api.mainnet-beta.solana.com
 ```
