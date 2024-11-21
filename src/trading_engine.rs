@@ -29,7 +29,6 @@ impl TradingEngine {
                 Err(e) => println!("Error processing market data: {:?}", e),
             }
         }
-        println!("Results: {:?}", results);
         results
     }
 }

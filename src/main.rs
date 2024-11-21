@@ -201,10 +201,10 @@ async fn main() -> Result<()> {
 
             println!("Most profitable strategy: {:?}", most_profitable_strategy);
 
-            // match jito_client.send_bundle(&most_profitable_strategy.txs).await {
-            //     Ok(v) => println!("Bundle sent successfully: {:?}", v),
-            //     Err(e) => println!("Error sending bundle: {:?}", e),
-            // }
+            match jito_client.send_bundle(&most_profitable_strategy.txs).await {
+                Ok(v) => println!("Bundle sent successfully: {:?}", v),
+                Err(e) => println!("Error sending bundle: {:?}", e),
+            }
         }
         tokio::time::sleep(Duration::from_secs(60 * 5)).await;
     }
