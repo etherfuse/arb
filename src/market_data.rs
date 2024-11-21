@@ -1,9 +1,10 @@
 use crate::constants::{MAX_STABLEBOND_AMOUNT_PER_TRADE, MAX_USDC_AMOUNT_PER_TRADE, USDC_MINT};
 use crate::etherfuse::EtherfuseClient;
-use crate::{jito::JitoClient, math};
+use crate::{jito::JitoClient, math, switchboard::SwitchboardClient};
 use anyhow::Result;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
+use solana_sdk::transaction::VersionedTransaction;
 use spl_associated_token_account::{
     get_associated_token_address, get_associated_token_address_with_program_id,
 };
@@ -18,6 +19,7 @@ pub struct MarketData {
     pub purchase_liquidity_stablebond_amount: Option<u64>,
     pub usdc_holdings_token_amount: Option<u64>,
     pub jito_tip: Option<u64>,
+    pub switchboard_update_tx: Option<VersionedTransaction>,
 }
 
 pub struct MarketDataBuilder {
@@ -25,12 +27,14 @@ pub struct MarketDataBuilder {
     pub wallet: Pubkey,
     pub etherfuse_client: EtherfuseClient,
     pub jito_client: JitoClient,
+    pub switchboard_client: SwitchboardClient,
     pub etherfuse_price_per_token: Option<f64>,
     pub sell_liquidity_usdc_amount: Option<u64>,
     pub stablebond_holdings_token_amount: Option<u64>,
     pub purchase_liquidity_stablebond_amount: Option<u64>,
     pub usdc_holdings_token_amount: Option<u64>,
     pub jito_tip: Option<u64>,
+    pub switchboard_update_tx: Option<VersionedTransaction>,
 }
 
 impl MarketDataBuilder {
@@ -39,18 +43,21 @@ impl MarketDataBuilder {
         wallet: Pubkey,
         etherfuse_client: EtherfuseClient,
         jito_client: JitoClient,
+        switchboard_client: SwitchboardClient,
     ) -> Self {
         MarketDataBuilder {
             rpc_client,
             wallet,
             etherfuse_client,
             jito_client,
+            switchboard_client,
             etherfuse_price_per_token: None,
             sell_liquidity_usdc_amount: None,
             stablebond_holdings_token_amount: None,
             purchase_liquidity_stablebond_amount: None,
             usdc_holdings_token_amount: None,
             jito_tip: None,
+            switchboard_update_tx: None,
         }
     }
 
@@ -62,6 +69,7 @@ impl MarketDataBuilder {
             purchase_liquidity_stablebond_amount: self.purchase_liquidity_stablebond_amount,
             usdc_holdings_token_amount: self.usdc_holdings_token_amount,
             jito_tip: self.jito_tip,
+            switchboard_update_tx: self.switchboard_update_tx,
         }
     }
 
@@ -119,6 +127,28 @@ impl MarketDataBuilder {
 
     pub async fn with_jito_tip(mut self) -> Self {
         self.jito_tip = Some(self.jito_client.get_jito_tip().await.unwrap());
+        self
+    }
+
+    pub async fn with_update_switchboard_oracle_tx(mut self, stablebond_mint: &Pubkey) -> Self {
+        let payment_feed = self
+            .etherfuse_client
+            .fetch_payment_feed(stablebond_mint)
+            .await
+            .unwrap();
+
+        let switchboard_public_feed = if payment_feed.quote_price_feed == Pubkey::default() {
+            payment_feed.base_price_feed
+        } else {
+            payment_feed.quote_price_feed
+        };
+
+        self.switchboard_update_tx = Some(
+            self.switchboard_client
+                .get_update_switchboard_oracle_tx(switchboard_public_feed)
+                .await
+                .unwrap(),
+        );
         self
     }
 

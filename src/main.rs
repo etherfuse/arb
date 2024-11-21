@@ -1,4 +1,3 @@
-mod args;
 mod constants;
 mod etherfuse;
 mod field_as_string;
@@ -10,7 +9,6 @@ mod rate_limiter;
 mod strategy;
 mod switchboard;
 mod trading_engine;
-mod traits;
 mod transaction;
 
 use crate::{
@@ -18,7 +16,6 @@ use crate::{
     switchboard::SwitchboardClient, trading_engine::TradingEngine,
 };
 use anyhow::Result;
-use args::*;
 use clap::{arg, command, Parser};
 use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
 use market_data::{MarketData, MarketDataBuilder};
@@ -147,7 +144,6 @@ async fn main() -> Result<()> {
         rpc_client.clone(),
         jupiter_client.clone(),
         keypair_filepath.clone(),
-        switchboard_client.clone(),
         etherfuse_client.clone(),
     );
 
@@ -155,7 +151,6 @@ async fn main() -> Result<()> {
         rpc_client.clone(),
         jupiter_client.clone(),
         keypair_filepath.clone(),
-        switchboard_client.clone(),
         etherfuse_client.clone(),
     );
 
@@ -166,6 +161,7 @@ async fn main() -> Result<()> {
                 wallet_keypair.pubkey(),
                 etherfuse_client.clone(),
                 jito_client.clone(),
+                switchboard_client.clone(),
             )
             .with_etherfuse_price_per_token(&stablebond_mint)
             .await
@@ -178,6 +174,8 @@ async fn main() -> Result<()> {
             .with_usdc_holdings_token_amount()
             .await
             .with_jito_tip()
+            .await
+            .with_update_switchboard_oracle_tx(&stablebond_mint)
             .await
             .build();
 
@@ -204,8 +202,11 @@ async fn main() -> Result<()> {
             }
 
             println!("Most profitable strategy: {:?}", most_profitable_strategy);
-
-            match jito_client.send_bundle(&most_profitable_strategy.txs).await {
+            let mut txs = most_profitable_strategy.txs;
+            if let Some(update_oracle_tx) = market_data.switchboard_update_tx {
+                txs.insert(0, update_oracle_tx);
+            }
+            match jito_client.send_bundle(&txs).await {
                 Ok(v) => println!("Bundle sent successfully: {:?}", v),
                 Err(e) => println!("Error sending bundle: {:?}", e),
             }
@@ -215,13 +216,10 @@ async fn main() -> Result<()> {
 }
 
 fn parse_toml_config() -> Result<Vec<Pubkey>> {
-    // Changed return type to return the Vec
     let toml_str = fs::read_to_string("tokens.toml")?;
     let value = toml_str.parse::<Value>()?;
 
     let mut result: Vec<Pubkey> = Vec::new();
-
-    // Since we know the structure is { tokens: [...] }, we can access it directly
     if let Some(tokens) = value.get("tokens").and_then(|v| v.as_array()) {
         for token in tokens {
             if let Some(s) = token.as_str() {
@@ -230,5 +228,5 @@ fn parse_toml_config() -> Result<Vec<Pubkey>> {
         }
     }
 
-    Ok(result) // Return the Vec instead of ()
+    Ok(result)
 }

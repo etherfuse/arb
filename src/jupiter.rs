@@ -1,4 +1,3 @@
-use crate::args::JupiterQuoteArgs;
 use crate::constants::USDC_MINT;
 use crate::field_as_string;
 use crate::rate_limiter::RateLimiter;
@@ -262,6 +261,31 @@ struct SwapRequest {
 #[serde(rename_all = "camelCase")]
 struct SwapResponse {
     swap_transaction: String,
+}
+
+pub struct JupiterQuoteArgs {
+    pub input_mint: Pubkey,
+    pub output_mint: Pubkey,
+    pub amount: u64,
+    pub slippage_bps: Option<u64>,
+}
+
+pub struct JupiterSwapArgs {
+    pub input_mint: Pubkey,
+    pub output_mint: Pubkey,
+    pub amount: u64,
+    pub slippage_bps: Option<u64>,
+}
+
+impl From<JupiterSwapArgs> for JupiterQuoteArgs {
+    fn from(swap_args: JupiterSwapArgs) -> Self {
+        Self {
+            input_mint: swap_args.input_mint,
+            output_mint: swap_args.output_mint,
+            amount: swap_args.amount,
+            slippage_bps: swap_args.slippage_bps,
+        }
+    }
 }
 
 pub type JupiterResult<T> = std::result::Result<T, Error>;

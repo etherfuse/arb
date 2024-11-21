@@ -1,7 +1,6 @@
 use crate::market_data::MarketData;
 use crate::math;
-use crate::switchboard::SwitchboardClient;
-use crate::traits::{TokenAmountExt, UiAmountExt};
+use crate::math::{TokenAmountExt, UiAmountExt};
 use crate::{
     constants::{
         INITIAL_POINTS, MAX_RETRIES, MAX_TRADE_PERCENT, MIN_TRADE_PERCENT, MIN_USDC_AMOUNT,
@@ -10,7 +9,6 @@ use crate::{
     jupiter::JupiterClient,
 };
 use crate::{etherfuse::EtherfuseClient, jupiter::Quote};
-use crate::{InstantBondRedemptionArgs, PurchaseArgs};
 use anyhow::Result;
 use enum_dispatch::enum_dispatch;
 use solana_client::nonblocking::rpc_client::RpcClient;
@@ -31,7 +29,6 @@ pub struct BuyOnEtherfuseSellOnJupiter {
     pub rpc_client: Arc<RpcClient>,
     pub keypair_filepath: String,
     pub jupiter_client: JupiterClient,
-    pub switchboard_client: SwitchboardClient,
     pub etherfuse_client: EtherfuseClient,
 }
 
@@ -40,14 +37,12 @@ impl BuyOnEtherfuseSellOnJupiter {
         rpc_client: Arc<RpcClient>,
         jupiter_client: JupiterClient,
         keypair_filepath: String,
-        switchboard_client: SwitchboardClient,
         etherfuse_client: EtherfuseClient,
     ) -> Self {
         BuyOnEtherfuseSellOnJupiter {
             rpc_client,
             keypair_filepath,
             jupiter_client,
-            switchboard_client,
             etherfuse_client,
         }
     }
@@ -58,7 +53,6 @@ pub struct BuyOnJupiterSellOnEtherfuse {
     pub rpc_client: Arc<RpcClient>,
     pub jupiter_client: JupiterClient,
     pub keypair_filepath: String,
-    pub switchboard_client: SwitchboardClient,
     pub etherfuse_client: EtherfuseClient,
 }
 
@@ -67,14 +61,12 @@ impl BuyOnJupiterSellOnEtherfuse {
         rpc_client: Arc<RpcClient>,
         jupiter_client: JupiterClient,
         keypair_filepath: String,
-        switchboard_client: SwitchboardClient,
         etherfuse_client: EtherfuseClient,
     ) -> Self {
         BuyOnJupiterSellOnEtherfuse {
             rpc_client,
             jupiter_client,
             keypair_filepath,
-            switchboard_client,
             etherfuse_client,
         }
     }
@@ -85,7 +77,6 @@ pub struct SellOnJupiterBuyOnEtherfuse {
     pub rpc_client: Arc<RpcClient>,
     pub jupiter_client: JupiterClient,
     pub keypair_filepath: String,
-    pub switchboard_client: SwitchboardClient,
     pub etherfuse_client: EtherfuseClient,
 }
 
@@ -232,19 +223,7 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
         println!("Final best profit: {}", best_profit);
         println!("Final USDC amount: {}", best_usdc_amount);
         println!("Final Stablebond amount: {}", best_stablebond_amount);
-        let redemption_args = InstantBondRedemptionArgs {
-            amount: best_stablebond_amount,
-            mint: stablebond_mint.clone(),
-        };
-        println!("Redemption args: {:?}", redemption_args);
         let mut txs: Vec<VersionedTransaction> = Vec::new();
-        if let Ok(update_oracle_tx) = self
-            .switchboard_client
-            .get_update_switchboard_oracle_tx()
-            .await
-        {
-            txs.push(update_oracle_tx);
-        }
         if let Ok(buy_on_jupiter_tx) = self
             .jupiter_client
             .jupiter_swap_tx(best_quote.unwrap())
@@ -252,7 +231,7 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
         {
             if let Ok(redeem_on_etherfuse_tx) = self
                 .etherfuse_client
-                .instant_bond_redemption_tx(redemption_args)
+                .instant_bond_redemption_tx(best_stablebond_amount, stablebond_mint.clone())
                 .await
             {
                 txs.push(buy_on_jupiter_tx);
@@ -398,20 +377,12 @@ impl Strategy for BuyOnEtherfuseSellOnJupiter {
         println!("Final best profit: {}", best_profit);
         println!("Final USDC amount: {}", best_usdc_amount);
         println!("Final Stablebond amount: {}", best_stablebond_amount);
-        let purchase_args = PurchaseArgs {
-            amount: best_usdc_amount,
-            mint: stablebond_mint.clone(),
-        };
-        println!("Purchase args: {:?}\n", purchase_args);
         let mut txs: Vec<VersionedTransaction> = Vec::new();
-        if let Ok(update_oracle_tx) = self
-            .switchboard_client
-            .get_update_switchboard_oracle_tx()
+        if let Ok(buy_on_etherfuse_tx) = self
+            .etherfuse_client
+            .purchase_tx(best_usdc_amount, stablebond_mint.clone())
             .await
         {
-            txs.push(update_oracle_tx);
-        }
-        if let Ok(buy_on_etherfuse_tx) = self.etherfuse_client.purchase_tx(purchase_args).await {
             if let Ok(sell_on_jupiter_tx) = self
                 .jupiter_client
                 .jupiter_swap_tx(best_quote.unwrap())

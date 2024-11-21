@@ -28,10 +28,7 @@ use stablebond_sdk::{
     instructions::{PurchaseBond, PurchaseBondInstructionArgs},
 };
 
-use crate::args::InstantBondRedemptionArgs;
-use crate::{
-    args::PurchaseArgs, constants::USDC_MINT, field_as_string, transaction::build_and_sign_tx,
-};
+use crate::{constants::USDC_MINT, field_as_string, transaction::build_and_sign_tx};
 
 lazy_static! {
     static ref EXCHANGE_RATE_CONFIGS: HashMap<Pubkey, &'static str> = {
@@ -80,12 +77,10 @@ impl EtherfuseClient {
         read_keypair_file(&self.keypair_filepath).expect("Unable to read keypair filepath")
     }
 
-    pub async fn purchase_ix(&self, args: PurchaseArgs) -> Result<Instruction> {
-        let ix_args = PurchaseBondInstructionArgs {
-            amount: args.amount,
-        };
+    pub async fn purchase_ix(&self, amount: u64, stablebond_mint: Pubkey) -> Result<Instruction> {
+        let ix_args = PurchaseBondInstructionArgs { amount };
 
-        let bond_account = find_bond_pda(args.mint).0;
+        let bond_account = find_bond_pda(stablebond_mint).0;
         let data = self.rpc_client.get_account_data(&bond_account).await?;
         let bond = Bond::from_bytes(&data).unwrap();
 
@@ -138,16 +133,21 @@ impl EtherfuseClient {
         Ok(ix)
     }
 
-    pub async fn purchase_tx(&self, args: PurchaseArgs) -> Result<VersionedTransaction> {
-        let ix = self.purchase_ix(args).await?;
+    pub async fn purchase_tx(
+        &self,
+        amount: u64,
+        stablebond_mint: Pubkey,
+    ) -> Result<VersionedTransaction> {
+        let ix = self.purchase_ix(amount, stablebond_mint).await?;
         build_and_sign_tx(&self.rpc_client, &self.signer(), &[ix]).await
     }
 
     pub async fn instant_bond_redemption_ix(
         &self,
-        args: InstantBondRedemptionArgs,
+        amount: u64,
+        stablebond_mint: Pubkey,
     ) -> Result<Instruction> {
-        let bond_account = find_bond_pda(args.mint).0;
+        let bond_account = find_bond_pda(stablebond_mint).0;
         let data = self.rpc_client.get_account_data(&bond_account).await?;
         let bond = Bond::from_bytes(&data).unwrap();
 
@@ -173,9 +173,7 @@ impl EtherfuseClient {
         let sell_liquidity = SellLiquidity::from_bytes(&sell_liuqidity_data).unwrap();
         let sell_liquidity_token_account =
             get_associated_token_address(&sell_liquidity_account, &payment_feed.payment_mint);
-        let ix_args = InstantBondRedemptionInstructionArgs {
-            amount: args.amount,
-        };
+        let ix_args = InstantBondRedemptionInstructionArgs { amount };
 
         let ix = InstantBondRedemption {
             user_wallet: user_wallet.pubkey(),
@@ -212,9 +210,12 @@ impl EtherfuseClient {
 
     pub async fn instant_bond_redemption_tx(
         &self,
-        args: InstantBondRedemptionArgs,
+        amount: u64,
+        stablebond_mint: Pubkey,
     ) -> Result<VersionedTransaction> {
-        let ix = self.instant_bond_redemption_ix(args).await?;
+        let ix = self
+            .instant_bond_redemption_ix(amount, stablebond_mint)
+            .await?;
         build_and_sign_tx(&self.rpc_client, &self.signer(), &[ix]).await
     }
 
@@ -260,6 +261,19 @@ impl EtherfuseClient {
             .await?;
         let usdc_token_account_info = TokenAccount::unpack(&usdc_token_account_data)?;
         Ok(usdc_token_account_info.amount)
+    }
+
+    pub async fn fetch_payment_feed(&self, stablebond_mint: &Pubkey) -> Result<PaymentFeed> {
+        let bond = find_bond_pda(*stablebond_mint).0;
+        let data = self.rpc_client.get_account_data(&bond).await?;
+        let bond = Bond::from_bytes(&data).unwrap();
+        let payment_feed_account = find_payment_feed_pda(bond.payment_feed_type).0;
+        let data = self
+            .rpc_client
+            .get_account_data(&payment_feed_account)
+            .await?;
+        let payment_feed = PaymentFeed::from_bytes(&data).unwrap();
+        Ok(payment_feed)
     }
 
     pub async fn fetch_purchase_liquidity_stablebond_amount(

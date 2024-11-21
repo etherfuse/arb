@@ -10,7 +10,6 @@ use solana_sdk::{
     signer::Signer,
     transaction::VersionedTransaction,
 };
-use std::str::FromStr;
 use std::sync::Arc;
 use switchboard_on_demand_client;
 
@@ -33,12 +32,12 @@ impl SwitchboardClient {
             .expect(format!("No keypair found at {}", self.keypair_filepath).as_str())
     }
 
-    pub async fn get_update_switchboard_oracle_tx(&self) -> Result<VersionedTransaction> {
+    pub async fn get_update_switchboard_oracle_tx(
+        &self,
+        public_feed: Pubkey,
+    ) -> Result<VersionedTransaction> {
         let (update_oracle_ix, lookup_tables) = self
-            .fetch_oracle_feed(
-                Pubkey::from_str("ByTpJ7pxD86SJqCcpewN7HdNkePrStCED1Gd4h2SJYCa").unwrap(),
-                self.signer().pubkey(),
-            )
+            .fetch_oracle_feed(public_feed, self.signer().pubkey())
             .await?;
 
         let blockhash = self
