@@ -10,7 +10,6 @@ use crate::{etherfuse::EtherfuseClient, jupiter::Quote};
 use crate::{InstantBondRedemptionArgs, PurchaseArgs};
 use anyhow::Result;
 use enum_dispatch::enum_dispatch;
-use solana_account_decoder::parse_token::token_amount_to_ui_amount;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{pubkey::Pubkey, transaction::VersionedTransaction};
 use std::sync::Arc;
@@ -128,65 +127,115 @@ impl Strategy for JupiterSellBuyEtherfuse {
         // let mut max_stablebond_token_amount_to_redeem =
         //     math::to_token_amount(max_stablebond_ui_amount_to_redeem, STABLEBOND_DECIMALS)?;
 
-        let mut best_profit = f64::MIN;
+        let mut best_profit: f64 = 0.0;
         let mut best_usdc_amount = 0;
         let mut best_stablebond_amount = 0;
         let mut best_quote: Option<Quote> = None;
 
-        let mut left = MIN_USDC_AMOUNT;
-        let mut right = max_usdc_token_amount_to_redeem;
+        // Strategy constants
+        const MIN_TRADE_PERCENT: f64 = 0.01; // 1% of max amount
+        const MAX_TRADE_PERCENT: f64 = 1.0; // 100% of max amount
+        const INITIAL_POINTS: usize = 8; // Test 8 different sizes
+        const MAX_RETRIES: u32 = 3;
+        const RETRY_DELAY_MS: u64 = 60000;
 
-        while left <= right {
-            let mid_usdc = left + (right - left) / 2;
-            let mid_stablebond = (mid_usdc as f64 / etherfuse_price_per_token) as u64;
+        let max_amount = max_usdc_token_amount_to_redeem;
 
-            let (price_when_buying, buy_quote) = loop {
+        // Generate initial test points with exponential distribution
+        let points: Vec<f64> = (0..INITIAL_POINTS)
+            .map(|i| {
+                let t = i as f64 / (INITIAL_POINTS - 1) as f64;
+                let exp_t = t.powf(1.5); // Exponential distribution
+                MIN_TRADE_PERCENT + (MAX_TRADE_PERCENT - MIN_TRADE_PERCENT) * exp_t
+            })
+            .collect();
+
+        println!("\n📊 Initial scan points (% of max amount):");
+        for p in &points {
+            println!("{:.1}%", p * 100.0);
+        }
+
+        // Test each trade size
+        for trade_percent in points {
+            let usdc_amount = (max_amount as f64 * trade_percent) as u64;
+            let stablebond_amount = (usdc_amount as f64 / etherfuse_price_per_token) as u64;
+
+            // Skip tiny amounts
+            if usdc_amount < MIN_USDC_AMOUNT {
+                continue;
+            }
+
+            // Get quote with retries
+            let mut retries = 0;
+            let quote_result = loop {
                 match self
                     .jupiter_client
-                    .buy_quote(stablebond_mint, mid_usdc)
+                    .buy_quote(stablebond_mint, usdc_amount)
                     .await
                 {
-                    Ok(quote) => break quote,
+                    Ok(quote) => break Some(quote),
                     Err(e) => {
-                        println!("Error getting buy quote, retrying: {}", e);
+                        retries += 1;
+                        if retries >= MAX_RETRIES {
+                            println!("Failed to get quote after {} retries: {}", MAX_RETRIES, e);
+                            break None;
+                        }
+                        println!("Retry {}/{}: {}", retries, MAX_RETRIES, e);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS))
+                            .await;
                     }
                 }
             };
 
-            let potential_profit = math::profit_from_arb(
+            let (price_when_buying, buy_quote) = match quote_result {
+                Some(quote) => quote,
+                None => continue,
+            };
+
+            // Calculate price impact
+            let price_impact =
+                (price_when_buying - etherfuse_price_per_token) / etherfuse_price_per_token;
+
+            let potential_profit = match math::profit_from_arb(
                 price_when_buying,
                 etherfuse_price_per_token,
-                mid_stablebond.to_ui_amount(STABLEBOND_DECIMALS),
-            )?;
+                stablebond_amount.to_ui_amount(STABLEBOND_DECIMALS),
+            ) {
+                Ok(profit) => profit,
+                Err(e) => {
+                    println!("Error calculating profit: {}. Skipping.", e);
+                    continue;
+                }
+            };
 
-            println!("Price when buying: {}", price_when_buying);
-            println!("Etherfuse price per token: {}", etherfuse_price_per_token);
-            println!("Stablebond amount: {}", mid_stablebond);
-            println!("USDC amount: {}", mid_usdc);
-            println!("buy_quote: {:?}", buy_quote);
-            println!("Profit: {}", potential_profit);
+            println!("\nTrade Analysis:");
+            println!("Trade Size: {}% of max", trade_percent * 100.0);
+            println!("USDC Amount: {}", usdc_amount);
+            println!("Price Impact: {:.2}%", price_impact * 100.0);
+            println!("Potential Profit: {}", potential_profit);
+            println!("Buy Price: {}", price_when_buying);
+            println!("Base Price: {}", etherfuse_price_per_token);
 
             if potential_profit > best_profit {
+                println!("\n🎯 New best trade found!");
+                println!("Previous best profit: {}", best_profit);
+                println!("New best profit: {}", potential_profit);
+
                 best_profit = potential_profit;
-                best_usdc_amount = mid_usdc;
-                best_stablebond_amount = mid_stablebond;
+                best_usdc_amount = usdc_amount;
+                best_stablebond_amount = stablebond_amount;
                 best_quote = Some(buy_quote);
-                left = mid_usdc + 1;
-            } else {
-                right = mid_usdc - 1;
             }
         }
+
         if best_quote.is_none() {
-            return Err(anyhow::anyhow!(
-                "No quote found for the strategy JupiterSellBuyEtherfuse",
-            ));
+            return Err(anyhow::anyhow!("No profitable trades found"));
         }
-        println!(
-            "Jupiter Buy -> Etherfuse Sell\nUSDC Amount: {}\nStablebond Amount: {}\nProfit: {}",
-            token_amount_to_ui_amount(best_usdc_amount, USDC_DECIMALS).ui_amount_string,
-            token_amount_to_ui_amount(best_stablebond_amount, STABLEBOND_DECIMALS).ui_amount_string,
-            best_profit
-        );
+
+        println!("\n🏁 Search Complete");
+        println!("Final best profit: {}", best_profit);
+        println!("Final USDC amount: {}", best_usdc_amount);
+        println!("Final Stablebond amount: {}", best_stablebond_amount);
         let redemption_args = InstantBondRedemptionArgs {
             amount: best_stablebond_amount,
             mint: stablebond_mint.clone(),
@@ -253,67 +302,115 @@ impl Strategy for BuyEtherfuseSellJupiter {
         // let stablebond_token_amount_to_sell =
         //     stablebond_ui_amount_to_sell.to_token_amount(STABLEBOND_DECIMALS);
 
-        let mut best_profit = f64::MIN;
+        let mut best_profit: f64 = 0.0;
         let mut best_usdc_amount = 0;
         let mut best_stablebond_amount = 0;
         let mut best_quote: Option<Quote> = None;
 
-        let mut left = MIN_USDC_AMOUNT;
-        let mut right = max_usdc_token_amount_to_purchase;
+        // Strategy constants
+        const MIN_TRADE_PERCENT: f64 = 0.01; // 1% of max amount
+        const MAX_TRADE_PERCENT: f64 = 1.0; // 100% of max amount
+        const INITIAL_POINTS: usize = 8; // Test 8 different sizes
+        const MAX_RETRIES: u32 = 3;
+        const RETRY_DELAY_MS: u64 = 60000; // Kept your 60s retry delay
 
-        while left <= right {
-            let mid_usdc = left + (right - left) / 2;
-            let mid_stablebond = (mid_usdc as f64 / etherfuse_price_per_token) as u64;
+        let max_amount = max_usdc_token_amount_to_purchase;
 
-            let (price_per_token_when_selling, sell_quote) = loop {
+        // Generate initial test points with exponential distribution
+        let points: Vec<f64> = (0..INITIAL_POINTS)
+            .map(|i| {
+                let t = i as f64 / (INITIAL_POINTS - 1) as f64;
+                let exp_t = t.powf(1.5); // Exponential distribution
+                MIN_TRADE_PERCENT + (MAX_TRADE_PERCENT - MIN_TRADE_PERCENT) * exp_t
+            })
+            .collect();
+
+        println!("\n📊 Initial scan points (% of max amount):");
+        for p in &points {
+            println!("{:.1}%", p * 100.0);
+        }
+
+        // Test each trade size
+        for trade_percent in points {
+            let usdc_amount = (max_amount as f64 * trade_percent) as u64;
+            let stablebond_amount = (usdc_amount as f64 / etherfuse_price_per_token) as u64;
+
+            // Skip tiny amounts
+            if usdc_amount < MIN_USDC_AMOUNT {
+                continue;
+            }
+
+            // Get quote with retries
+            let mut retries = 0;
+            let quote_result = loop {
                 match self
                     .jupiter_client
-                    .sell_quote(stablebond_mint, mid_stablebond)
+                    .sell_quote(stablebond_mint, stablebond_amount)
                     .await
                 {
-                    Ok(quote) => break quote,
+                    Ok(quote) => break Some(quote),
                     Err(e) => {
-                        println!("Error getting sell quote, retrying: {}", e);
+                        retries += 1;
+                        if retries >= MAX_RETRIES {
+                            println!("Failed to get quote after {} retries: {}", MAX_RETRIES, e);
+                            break None;
+                        }
+                        println!("Retry {}/{}: {}", retries, MAX_RETRIES, e);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS))
+                            .await;
                     }
                 }
             };
 
-            let potential_profit = math::profit_from_arb(
+            let (price_per_token_when_selling, sell_quote) = match quote_result {
+                Some(quote) => quote,
+                None => continue,
+            };
+
+            // Calculate price impact (note the reversed order for selling)
+            let price_impact = (etherfuse_price_per_token - price_per_token_when_selling)
+                / etherfuse_price_per_token;
+
+            let potential_profit = match math::profit_from_arb(
                 price_per_token_when_selling,
                 etherfuse_price_per_token,
-                mid_stablebond.to_ui_amount(STABLEBOND_DECIMALS),
-            )?;
+                stablebond_amount.to_ui_amount(STABLEBOND_DECIMALS),
+            ) {
+                Ok(profit) => profit,
+                Err(e) => {
+                    println!("Error calculating profit: {}. Skipping.", e);
+                    continue;
+                }
+            };
 
-            println!("Price when selling: {}", price_per_token_when_selling);
-            println!("Etherfuse price per token: {}", etherfuse_price_per_token);
-            println!("Stablebond amount: {}", mid_stablebond);
-            println!("USDC amount: {}", mid_usdc);
-            println!("sell_quote: {:?}", sell_quote);
-            println!("Profit: {}", potential_profit);
+            println!("\nTrade Analysis:");
+            println!("Trade Size: {}% of max", trade_percent * 100.0);
+            println!("USDC Amount: {}", usdc_amount);
+            println!("Price Impact: {:.2}%", price_impact * 100.0);
+            println!("Potential Profit: {}", potential_profit);
+            println!("Sell Price: {}", price_per_token_when_selling);
+            println!("Base Price: {}", etherfuse_price_per_token);
 
             if potential_profit > best_profit {
+                println!("\n🎯 New best trade found!");
+                println!("Previous best profit: {}", best_profit);
+                println!("New best profit: {}", potential_profit);
+
                 best_profit = potential_profit;
-                best_usdc_amount = mid_usdc;
-                best_stablebond_amount = mid_stablebond;
+                best_usdc_amount = usdc_amount;
+                best_stablebond_amount = stablebond_amount;
                 best_quote = Some(sell_quote);
-                left = mid_usdc + 1;
-            } else {
-                right = mid_usdc - 1;
             }
         }
 
         if best_quote.is_none() {
-            return Err(anyhow::anyhow!(
-                "No quote found for the strategy BuyEtherfuseSellJupiter",
-            ));
+            return Err(anyhow::anyhow!("No profitable trades found"));
         }
 
-        println!(
-            "\nJupiter Sell -> Etherfuse Buy\nUSDC Amount: {}\nStablebond Amount: {}\nProfit: {}",
-            token_amount_to_ui_amount(best_usdc_amount, USDC_DECIMALS).ui_amount_string,
-            token_amount_to_ui_amount(best_stablebond_amount, STABLEBOND_DECIMALS).ui_amount_string,
-            best_profit
-        );
+        println!("\n🏁 Search Complete");
+        println!("Final best profit: {}", best_profit);
+        println!("Final USDC amount: {}", best_usdc_amount);
+        println!("Final Stablebond amount: {}", best_stablebond_amount);
         let purchase_args = PurchaseArgs {
             amount: best_usdc_amount,
             mint: stablebond_mint.clone(),
