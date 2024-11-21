@@ -10,7 +10,9 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 use stablebond_sdk::accounts::Issuance;
-use stablebond_sdk::instructions::{InstantBondRedemption, InstantBondRedemptionInstructionArgs};
+use stablebond_sdk::instructions::{
+    InstantBondRedemptionV2, InstantBondRedemptionV2InstructionArgs,
+};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -23,9 +25,9 @@ use std::collections::HashMap;
 
 use stablebond_sdk::{
     accounts::{Bond, PaymentFeed, SellLiquidity},
-    find_bond_pda, find_issuance_pda, find_payment_feed_pda, find_payment_pda,
+    find_bond_pda, find_issuance_pda, find_kyc_pda, find_payment_feed_pda, find_payment_pda,
     find_sell_liquidity_pda,
-    instructions::{PurchaseBond, PurchaseBondInstructionArgs},
+    instructions::{PurchaseBondV2, PurchaseBondV2InstructionArgs},
 };
 
 use crate::{constants::USDC_MINT, field_as_string, transaction::build_and_sign_tx};
@@ -78,7 +80,7 @@ impl EtherfuseClient {
     }
 
     pub async fn purchase_ix(&self, amount: u64, stablebond_mint: Pubkey) -> Result<Instruction> {
-        let ix_args = PurchaseBondInstructionArgs { amount };
+        let ix_args = PurchaseBondV2InstructionArgs { amount };
 
         let bond_account = find_bond_pda(stablebond_mint).0;
         let data = self.rpc_client.get_account_data(&bond_account).await?;
@@ -100,7 +102,8 @@ impl EtherfuseClient {
             payment_quote_price_feed_account = Some(payment_feed.quote_price_feed);
         }
 
-        let ix = PurchaseBond {
+        let ix = PurchaseBondV2 {
+            kyc_account: find_kyc_pda(user_wallet.pubkey()).0,
             user_wallet: user_wallet.pubkey(),
             user_token_account: get_associated_token_address_with_program_id(
                 &user_wallet.pubkey(),
@@ -173,9 +176,10 @@ impl EtherfuseClient {
         let sell_liquidity = SellLiquidity::from_bytes(&sell_liuqidity_data).unwrap();
         let sell_liquidity_token_account =
             get_associated_token_address(&sell_liquidity_account, &payment_feed.payment_mint);
-        let ix_args = InstantBondRedemptionInstructionArgs { amount };
+        let ix_args = InstantBondRedemptionV2InstructionArgs { amount };
 
-        let ix = InstantBondRedemption {
+        let ix = InstantBondRedemptionV2 {
+            kyc_account: find_kyc_pda(user_wallet.pubkey()).0,
             user_wallet: user_wallet.pubkey(),
             bond_account,
             issuance_account,
@@ -287,6 +291,14 @@ impl EtherfuseClient {
         let data = self.rpc_client.get_account_data(&issuance).await?;
         let issuance = Issuance::from_bytes(&data)?;
         Ok(issuance.liquidity)
+    }
+
+    pub async fn has_kyc_account(&self, user_wallet: &Pubkey) -> bool {
+        let kyc_account = find_kyc_pda(*user_wallet).0;
+        match self.rpc_client.get_account_data(&kyc_account).await {
+            Ok(_) => true,
+            Err(_) => false,
+        }
     }
 }
 
