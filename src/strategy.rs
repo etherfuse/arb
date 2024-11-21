@@ -3,7 +3,10 @@ use crate::math;
 use crate::switchboard::SwitchboardClient;
 use crate::traits::{TokenAmountExt, UiAmountExt};
 use crate::{
-    constants::{MIN_USDC_AMOUNT, STABLEBOND_DECIMALS, USDC_DECIMALS},
+    constants::{
+        INITIAL_POINTS, MAX_RETRIES, MAX_TRADE_PERCENT, MIN_TRADE_PERCENT, MIN_USDC_AMOUNT,
+        RETRY_DELAY_MS, STABLEBOND_DECIMALS, USDC_DECIMALS,
+    },
     jupiter::JupiterClient,
 };
 use crate::{etherfuse::EtherfuseClient, jupiter::Quote};
@@ -24,7 +27,7 @@ pub trait Strategy {
 }
 
 #[derive(Clone)]
-pub struct BuyEtherfuseSellJupiter {
+pub struct BuyOnEtherfuseSellOnJupiter {
     pub rpc_client: Arc<RpcClient>,
     pub keypair_filepath: String,
     pub jupiter_client: JupiterClient,
@@ -32,7 +35,7 @@ pub struct BuyEtherfuseSellJupiter {
     pub etherfuse_client: EtherfuseClient,
 }
 
-impl BuyEtherfuseSellJupiter {
+impl BuyOnEtherfuseSellOnJupiter {
     pub fn new(
         rpc_client: Arc<RpcClient>,
         jupiter_client: JupiterClient,
@@ -40,7 +43,7 @@ impl BuyEtherfuseSellJupiter {
         switchboard_client: SwitchboardClient,
         etherfuse_client: EtherfuseClient,
     ) -> Self {
-        BuyEtherfuseSellJupiter {
+        BuyOnEtherfuseSellOnJupiter {
             rpc_client,
             keypair_filepath,
             jupiter_client,
@@ -51,7 +54,7 @@ impl BuyEtherfuseSellJupiter {
 }
 
 #[derive(Clone)]
-pub struct JupiterSellBuyEtherfuse {
+pub struct BuyOnJupiterSellOnEtherfuse {
     pub rpc_client: Arc<RpcClient>,
     pub jupiter_client: JupiterClient,
     pub keypair_filepath: String,
@@ -59,7 +62,7 @@ pub struct JupiterSellBuyEtherfuse {
     pub etherfuse_client: EtherfuseClient,
 }
 
-impl JupiterSellBuyEtherfuse {
+impl BuyOnJupiterSellOnEtherfuse {
     pub fn new(
         rpc_client: Arc<RpcClient>,
         jupiter_client: JupiterClient,
@@ -67,7 +70,7 @@ impl JupiterSellBuyEtherfuse {
         switchboard_client: SwitchboardClient,
         etherfuse_client: EtherfuseClient,
     ) -> Self {
-        JupiterSellBuyEtherfuse {
+        BuyOnJupiterSellOnEtherfuse {
             rpc_client,
             jupiter_client,
             keypair_filepath,
@@ -77,13 +80,22 @@ impl JupiterSellBuyEtherfuse {
     }
 }
 
-#[enum_dispatch(Strategy)]
-pub enum StrategyEnum {
-    BuyEtherfuseSellJupiter,
-    JupiterSellBuyEtherfuse,
+#[derive(Clone)]
+pub struct SellOnJupiterBuyOnEtherfuse {
+    pub rpc_client: Arc<RpcClient>,
+    pub jupiter_client: JupiterClient,
+    pub keypair_filepath: String,
+    pub switchboard_client: SwitchboardClient,
+    pub etherfuse_client: EtherfuseClient,
 }
 
-impl Strategy for JupiterSellBuyEtherfuse {
+#[enum_dispatch(Strategy)]
+pub enum StrategyEnum {
+    BuyOnJupiterSellOnEtherfuse,
+    BuyOnEtherfuseSellOnJupiter,
+}
+
+impl Strategy for BuyOnJupiterSellOnEtherfuse {
     async fn process_market_data(
         &mut self,
         md: &MarketData,
@@ -95,13 +107,16 @@ impl Strategy for JupiterSellBuyEtherfuse {
         let stablebond_holdings_token_amount = md
             .stablebond_holdings_token_amount
             .ok_or_else(|| anyhow::anyhow!("Missing stablebond_holdings_token_amount"))?;
+        let usdc_holdings_token_amount = md
+            .usdc_holdings_token_amount
+            .ok_or_else(|| anyhow::anyhow!("Missing usdc_holdings_token_amount"))?;
         let etherfuse_price_per_token = md
             .etherfuse_price_per_token
             .ok_or_else(|| anyhow::anyhow!("Missing etherfuse_price_per_token"))?;
 
-        if stablebond_holdings_token_amount == 0 {
+        if usdc_holdings_token_amount == 0 {
             return Err(anyhow::anyhow!(
-                "Existing stablebond holdings are required for this strategy"
+                "USDC holdings are required for this strategy"
             ));
         }
         if sell_liquidity_usdc_amount == 0 {
@@ -121,23 +136,10 @@ impl Strategy for JupiterSellBuyEtherfuse {
         let max_usdc_token_amount_to_redeem =
             math::to_token_amount(max_usdc_ui_amount_to_redeem, USDC_DECIMALS)?;
 
-        // let max_stablebond_ui_amount_to_redeem =
-        //     math::checked_float_div(max_usdc_ui_amount_to_redeem, self.etherfuse_price_per_token)?;
-
-        // let mut max_stablebond_token_amount_to_redeem =
-        //     math::to_token_amount(max_stablebond_ui_amount_to_redeem, STABLEBOND_DECIMALS)?;
-
         let mut best_profit: f64 = 0.0;
         let mut best_usdc_amount = 0;
         let mut best_stablebond_amount = 0;
         let mut best_quote: Option<Quote> = None;
-
-        // Strategy constants
-        const MIN_TRADE_PERCENT: f64 = 0.01; // 1% of max amount
-        const MAX_TRADE_PERCENT: f64 = 1.0; // 100% of max amount
-        const INITIAL_POINTS: usize = 8; // Test 8 different sizes
-        const MAX_RETRIES: u32 = 3;
-        const RETRY_DELAY_MS: u64 = 60000;
 
         let max_amount = max_usdc_token_amount_to_redeem;
 
@@ -149,12 +151,6 @@ impl Strategy for JupiterSellBuyEtherfuse {
                 MIN_TRADE_PERCENT + (MAX_TRADE_PERCENT - MIN_TRADE_PERCENT) * exp_t
             })
             .collect();
-
-        println!("\n📊 Initial scan points (% of max amount):");
-        for p in &points {
-            println!("{:.1}%", p * 100.0);
-        }
-
         // Test each trade size
         for trade_percent in points {
             let usdc_amount = (max_amount as f64 * trade_percent) as u64;
@@ -270,7 +266,7 @@ impl Strategy for JupiterSellBuyEtherfuse {
     }
 }
 
-impl Strategy for BuyEtherfuseSellJupiter {
+impl Strategy for BuyOnEtherfuseSellOnJupiter {
     async fn process_market_data(
         &mut self,
         md: &MarketData,
@@ -279,6 +275,9 @@ impl Strategy for BuyEtherfuseSellJupiter {
         let usdc_holdings_token_amount = md
             .usdc_holdings_token_amount
             .ok_or_else(|| anyhow::anyhow!("Missing usdc_holdings_token_amount"))?;
+        let purchase_liquidity_stablebond_amount = md
+            .purchase_liquidity_stablebond_amount
+            .ok_or_else(|| anyhow::anyhow!("Missing purchase_liquidity_stablebond_amount"))?;
         let etherfuse_price_per_token = md
             .etherfuse_price_per_token
             .ok_or_else(|| anyhow::anyhow!("Missing etherfuse_price_per_token"))?;
@@ -288,33 +287,26 @@ impl Strategy for BuyEtherfuseSellJupiter {
                 "USDC holdings are required for this strategy"
             ));
         }
+        if purchase_liquidity_stablebond_amount == 0 {
+            return Err(anyhow::anyhow!(
+                "Stablebond purchase liquidity is required for this strategy"
+            ));
+        }
 
-        let max_usdc_ui_amount_to_purchase =
-            math::checked_float_mul(usdc_holdings_token_amount.to_ui_amount(USDC_DECIMALS), 0.99)?;
-        let max_usdc_token_amount_to_purchase =
-            max_usdc_ui_amount_to_purchase.to_token_amount(USDC_DECIMALS);
-
-        // let stablebond_ui_amount_to_sell = math::checked_float_div(
-        //     max_usdc_ui_amount_to_purchase,
-        //     self.etherfuse_price_per_token,
-        // )?;
-
-        // let stablebond_token_amount_to_sell =
-        //     stablebond_ui_amount_to_sell.to_token_amount(STABLEBOND_DECIMALS);
+        let purchase_liquidity_ui_amount_ =
+            purchase_liquidity_stablebond_amount.to_ui_amount(STABLEBOND_DECIMALS);
+        let max_usdc_to_purchase_ui_amount =
+            math::checked_float_mul(purchase_liquidity_ui_amount_, etherfuse_price_per_token)?
+                .min(usdc_holdings_token_amount.to_ui_amount(USDC_DECIMALS));
+        let max_usdc_to_purchase_token_amount =
+            max_usdc_to_purchase_ui_amount.to_token_amount(STABLEBOND_DECIMALS);
 
         let mut best_profit: f64 = 0.0;
         let mut best_usdc_amount = 0;
         let mut best_stablebond_amount = 0;
         let mut best_quote: Option<Quote> = None;
 
-        // Strategy constants
-        const MIN_TRADE_PERCENT: f64 = 0.01; // 1% of max amount
-        const MAX_TRADE_PERCENT: f64 = 1.0; // 100% of max amount
-        const INITIAL_POINTS: usize = 8; // Test 8 different sizes
-        const MAX_RETRIES: u32 = 3;
-        const RETRY_DELAY_MS: u64 = 60000; // Kept your 60s retry delay
-
-        let max_amount = max_usdc_token_amount_to_purchase;
+        let max_amount = max_usdc_to_purchase_token_amount;
 
         // Generate initial test points with exponential distribution
         let points: Vec<f64> = (0..INITIAL_POINTS)
@@ -324,11 +316,6 @@ impl Strategy for BuyEtherfuseSellJupiter {
                 MIN_TRADE_PERCENT + (MAX_TRADE_PERCENT - MIN_TRADE_PERCENT) * exp_t
             })
             .collect();
-
-        println!("\n📊 Initial scan points (% of max amount):");
-        for p in &points {
-            println!("{:.1}%", p * 100.0);
-        }
 
         // Test each trade size
         for trade_percent in points {

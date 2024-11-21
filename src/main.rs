@@ -31,7 +31,9 @@ use solana_sdk::{
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{fs, time::Duration};
-use strategy::{BuyEtherfuseSellJupiter, JupiterSellBuyEtherfuse, StrategyEnum, StrategyResult};
+use strategy::{
+    BuyOnEtherfuseSellOnJupiter, BuyOnJupiterSellOnEtherfuse, StrategyEnum, StrategyResult,
+};
 use toml::Value;
 
 #[derive(Parser)]
@@ -141,7 +143,7 @@ async fn main() -> Result<()> {
 
     let switchboard_client = SwitchboardClient::new(rpc_client.clone(), keypair_filepath.clone());
 
-    let buy_etherfuse_sell_jupiter = BuyEtherfuseSellJupiter::new(
+    let buy_on_etherfuse_sell_on_jupiter = BuyOnEtherfuseSellOnJupiter::new(
         rpc_client.clone(),
         jupiter_client.clone(),
         keypair_filepath.clone(),
@@ -149,7 +151,7 @@ async fn main() -> Result<()> {
         etherfuse_client.clone(),
     );
 
-    let jupiter_sell_buy_etherfuse = JupiterSellBuyEtherfuse::new(
+    let buy_on_jupiter_sell_on_etherfuse = BuyOnJupiterSellOnEtherfuse::new(
         rpc_client.clone(),
         jupiter_client.clone(),
         keypair_filepath.clone(),
@@ -169,6 +171,8 @@ async fn main() -> Result<()> {
             .await
             .with_sell_liquidity_usdc_amount(&stablebond_mint)
             .await
+            .with_purchase_liquidity_stablebond_amount(&stablebond_mint)
+            .await
             .with_stablebond_holdings_token_amount(&stablebond_mint)
             .await
             .with_usdc_holdings_token_amount()
@@ -178,11 +182,11 @@ async fn main() -> Result<()> {
             .build();
 
             let strategies = TradingEngine::new()
-                .add_strategy(StrategyEnum::BuyEtherfuseSellJupiter(
-                    buy_etherfuse_sell_jupiter.clone(),
+                .add_strategy(StrategyEnum::BuyOnEtherfuseSellOnJupiter(
+                    buy_on_etherfuse_sell_on_jupiter.clone(),
                 ))
-                .add_strategy(StrategyEnum::JupiterSellBuyEtherfuse(
-                    jupiter_sell_buy_etherfuse.clone(),
+                .add_strategy(StrategyEnum::BuyOnJupiterSellOnEtherfuse(
+                    buy_on_jupiter_sell_on_etherfuse.clone(),
                 ))
                 .run_strategies(&market_data, &stablebond_mint)
                 .await;

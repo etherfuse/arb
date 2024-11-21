@@ -8,7 +8,6 @@ use spl_associated_token_account::{
     get_associated_token_address, get_associated_token_address_with_program_id,
 };
 use spl_token_2022::ID as SPL_TOKEN_2022_PROGRAM_ID;
-use stablebond_sdk::find_bond_pda;
 use std::cmp::min;
 use std::{str::FromStr, sync::Arc};
 
@@ -16,6 +15,7 @@ pub struct MarketData {
     pub etherfuse_price_per_token: Option<f64>,
     pub sell_liquidity_usdc_amount: Option<u64>,
     pub stablebond_holdings_token_amount: Option<u64>,
+    pub purchase_liquidity_stablebond_amount: Option<u64>,
     pub usdc_holdings_token_amount: Option<u64>,
     pub jito_tip: Option<u64>,
 }
@@ -28,6 +28,7 @@ pub struct MarketDataBuilder {
     pub etherfuse_price_per_token: Option<f64>,
     pub sell_liquidity_usdc_amount: Option<u64>,
     pub stablebond_holdings_token_amount: Option<u64>,
+    pub purchase_liquidity_stablebond_amount: Option<u64>,
     pub usdc_holdings_token_amount: Option<u64>,
     pub jito_tip: Option<u64>,
 }
@@ -47,6 +48,7 @@ impl MarketDataBuilder {
             etherfuse_price_per_token: None,
             sell_liquidity_usdc_amount: None,
             stablebond_holdings_token_amount: None,
+            purchase_liquidity_stablebond_amount: None,
             usdc_holdings_token_amount: None,
             jito_tip: None,
         }
@@ -57,6 +59,7 @@ impl MarketDataBuilder {
             etherfuse_price_per_token: self.etherfuse_price_per_token,
             sell_liquidity_usdc_amount: self.sell_liquidity_usdc_amount,
             stablebond_holdings_token_amount: self.stablebond_holdings_token_amount,
+            purchase_liquidity_stablebond_amount: self.purchase_liquidity_stablebond_amount,
             usdc_holdings_token_amount: self.usdc_holdings_token_amount,
             jito_tip: self.jito_tip,
         }
@@ -75,7 +78,20 @@ impl MarketDataBuilder {
     pub async fn with_sell_liquidity_usdc_amount(mut self, stablebond_mint: &Pubkey) -> Self {
         self.sell_liquidity_usdc_amount = Some(
             self.etherfuse_client
-                .fetch_sell_liquidity_usdc_amount(&find_bond_pda(*stablebond_mint).0)
+                .fetch_sell_liquidity_usdc_amount(stablebond_mint)
+                .await
+                .unwrap_or(0),
+        );
+        self
+    }
+
+    pub async fn with_purchase_liquidity_stablebond_amount(
+        mut self,
+        stablebond_mint: &Pubkey,
+    ) -> Self {
+        self.purchase_liquidity_stablebond_amount = Some(
+            self.etherfuse_client
+                .fetch_purchase_liquidity_stablebond_amount(stablebond_mint)
                 .await
                 .unwrap_or(0),
         );

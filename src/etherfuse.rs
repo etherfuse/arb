@@ -1,8 +1,5 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use solana_account_decoder::UiAccountEncoding;
-use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
-use solana_client::rpc_filter::{Memcmp, RpcFilterType};
 use solana_program::{program_pack::Pack, system_program};
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
@@ -12,6 +9,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::VersionedTransaction,
 };
+use stablebond_sdk::accounts::Issuance;
 use stablebond_sdk::instructions::{InstantBondRedemption, InstantBondRedemptionInstructionArgs};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -28,7 +26,6 @@ use stablebond_sdk::{
     find_bond_pda, find_issuance_pda, find_payment_feed_pda, find_payment_pda,
     find_sell_liquidity_pda,
     instructions::{PurchaseBond, PurchaseBondInstructionArgs},
-    types::Discriminator,
 };
 
 use crate::args::InstantBondRedemptionArgs;
@@ -221,12 +218,15 @@ impl EtherfuseClient {
         build_and_sign_tx(&self.rpc_client, &self.signer(), &[ix]).await
     }
 
-    pub async fn get_etherfuse_price(&self, mint: &Pubkey) -> Result<f64> {
-        let url = format!("{}/lookup/bonds/cost/{:?}", self.etherfuse_api_url, mint);
+    pub async fn get_etherfuse_price(&self, stablebond_mint: &Pubkey) -> Result<f64> {
+        let url = format!(
+            "{}/lookup/bonds/cost/{:?}",
+            self.etherfuse_api_url, stablebond_mint
+        );
         let res: BondCostResponse = reqwest::get(url).await?.json().await?;
         let token_value = res.bond_cost_in_payment_token;
 
-        match self.get_etherfuse_exchange_rate(*mint).await {
+        match self.get_etherfuse_exchange_rate(*stablebond_mint).await {
             Ok(exchange_rate) => {
                 let price_in_usd = token_value / exchange_rate;
                 Ok(price_in_usd)
@@ -243,42 +243,15 @@ impl EtherfuseClient {
             .get(&stablebond_mint)
             .ok_or_else(|| anyhow::anyhow!("Unsupported stablebond mint"))?;
 
-        let response = reqwest::get(*url).await?;
-
-        // Debug the response
-        println!("Response status: {}", response.status());
-        let text = response.text().await?;
-        println!("Response body: {}", text);
-
-        // Try to parse the response
-        let res: ExchangeRateResponse = serde_json::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("Failed to parse response: {}, body: {}", e, text))?;
-
+        let res: ExchangeRateResponse = reqwest::get(*url).await?.json().await?;
         res.get_rate()
             .ok_or_else(|| anyhow::anyhow!("No valid exchange rate found in response"))
     }
 
-    #[allow(dead_code)]
-    pub async fn fetch_payment_feeds(&self) -> Result<Vec<PaymentFeed>> {
-        let payment_feed_accounts = self
-            .fetch_stablebond_accounts(Discriminator::PaymentFeed)
-            .await?
-            .into_iter()
-            .map(|(_, account)| {
-                PaymentFeed::from_bytes(&account.data)
-                    .map(|payment_feed| payment_feed)
-                    .map_err(|err| {
-                        anyhow::anyhow!("Unable to parse payment feed account: {:?}", err)
-                    })
-            })
-            .collect::<Result<Vec<PaymentFeed>>>()?;
-
-        Ok(payment_feed_accounts)
-    }
-
-    pub async fn fetch_sell_liquidity_usdc_amount(&self, bond: &Pubkey) -> Result<u64> {
+    pub async fn fetch_sell_liquidity_usdc_amount(&self, stablebond_mint: &Pubkey) -> Result<u64> {
+        let bond = find_bond_pda(*stablebond_mint).0;
         let usdc_token_account = get_associated_token_address(
-            &find_sell_liquidity_pda(*bond).0,
+            &find_sell_liquidity_pda(bond).0,
             &Pubkey::from_str(&USDC_MINT).unwrap(),
         );
         let usdc_token_account_data = self
@@ -289,51 +262,17 @@ impl EtherfuseClient {
         Ok(usdc_token_account_info.amount)
     }
 
-    #[allow(dead_code)]
-    async fn fetch_sell_liquidity(&self, bond: &Pubkey) -> Result<SellLiquidity> {
-        let sell_liquidity_account = self
-            .fetch_stablebond_accounts(Discriminator::SellLiquidity)
-            .await?
-            .into_iter()
-            .filter(|(pubkey, _)| pubkey == &find_sell_liquidity_pda(*bond).0)
-            .map(|(_, account)| {
-                SellLiquidity::from_bytes(&account.data)
-                    .map(|sell_liquidity| sell_liquidity)
-                    .map_err(|err| {
-                        anyhow::anyhow!("Unable to parse sell liquidity account: {:?}", err)
-                    })
-            })
-            .next() // Take only the first result
-            .ok_or_else(|| anyhow::anyhow!("No sell liquidity account found"))??; // Handle None case and unwrap Result
-
-        Ok(sell_liquidity_account)
-    }
-
-    #[allow(dead_code)]
-    async fn fetch_stablebond_accounts(
+    pub async fn fetch_purchase_liquidity_stablebond_amount(
         &self,
-        type_discriminator: Discriminator,
-    ) -> Result<Vec<(Pubkey, solana_sdk::account::Account)>> {
-        let accounts = self
-            .rpc_client
-            .get_program_accounts_with_config(
-                &stablebond_sdk::ID,
-                RpcProgramAccountsConfig {
-                    with_context: None,
-                    filters: Some(vec![RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
-                        0,
-                        vec![type_discriminator as u8],
-                    ))]),
-                    account_config: RpcAccountInfoConfig {
-                        encoding: Some(UiAccountEncoding::Binary),
-                        commitment: None,
-                        data_slice: None,
-                        min_context_slot: None,
-                    },
-                },
-            )
-            .await?;
-        Ok(accounts)
+        stablebond_mint: &Pubkey,
+    ) -> Result<u64> {
+        let bond = find_bond_pda(*stablebond_mint).0;
+        let bond_account = self.rpc_client.get_account_data(&bond).await?;
+        let data = Bond::from_bytes(&bond_account)?;
+        let issuance = find_issuance_pda(bond, data.issuance_number).0;
+        let data = self.rpc_client.get_account_data(&issuance).await?;
+        let issuance = Issuance::from_bytes(&data)?;
+        Ok(issuance.liquidity)
     }
 }
 

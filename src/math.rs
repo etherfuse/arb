@@ -91,6 +91,17 @@ pub fn checked_powi(arg: f64, exp: i32) -> Result<f64> {
     }
 }
 
+pub fn checked_float_sub<T>(arg1: T, arg2: T) -> Result<T>
+where
+    T: num_traits::Float + Display,
+{
+    let res = arg1 - arg2;
+    if !res.is_finite() {
+        return Err(anyhow!("Math overflow"));
+    }
+    Ok(res)
+}
+
 pub fn to_ui_amount(amount: u64, decimals: u8) -> Result<f64> {
     checked_float_div(
         checked_as_f64(amount)?,
@@ -105,12 +116,15 @@ pub fn to_token_amount(ui_amount: f64, decimals: u8) -> Result<u64> {
     )?)
 }
 
-pub fn profit_from_arb(
-    high_price_per_token: f64,
-    low_price_per_token: f64,
-    token_amount: f64,
-) -> Result<f64> {
-    let delta = high_price_per_token - low_price_per_token;
-    let profit = checked_float_mul(token_amount, delta)?;
+pub fn profit_from_arb(sell_price: f64, buy_price: f64, token_amount: f64) -> Result<f64> {
+    // Calculate total received from sell
+    let sell_proceeds = checked_float_mul(token_amount, sell_price)?;
+
+    // Calculate total spent on buy
+    let buy_cost = checked_float_mul(token_amount, buy_price)?;
+
+    // Calculate net profit
+    let profit = checked_float_sub(sell_proceeds, buy_cost)?;
+
     Ok(profit)
 }
