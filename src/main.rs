@@ -206,9 +206,8 @@ async fn main() -> Result<()> {
             if let Some(update_oracle_tx) = market_data.switchboard_update_tx {
                 txs.insert(0, update_oracle_tx);
             }
-            match jito_client.send_bundle(&txs).await {
-                Ok(v) => println!("Bundle sent successfully: {:?}", v),
-                Err(e) => println!("Error sending bundle: {:?}", e),
+            if let Err(e) = jito_client.send_bundle(&txs).await {
+                println!("Error sending bundle: {:?}", e)
             }
         }
         tokio::time::sleep(Duration::from_secs(60 * 5)).await;

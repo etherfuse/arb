@@ -215,14 +215,19 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
             }
         }
 
-        if best_quote.is_none() {
-            return Err(anyhow::anyhow!("No profitable trades found"));
-        }
-
         println!("\n🏁 Search Complete");
         println!("Final best profit: {}", best_profit);
         println!("Final USDC amount: {}", best_usdc_amount);
         println!("Final Stablebond amount: {}", best_stablebond_amount);
+
+        if best_quote.is_none() {
+            return Err(anyhow::anyhow!("No profitable trades found"));
+        }
+        if best_profit < 1.0 {
+            return Err(anyhow::anyhow!(
+                "All trades were less than $1.00 USD profit"
+            ));
+        }
         let mut txs: Vec<VersionedTransaction> = Vec::new();
         if let Ok(buy_on_jupiter_tx) = self
             .jupiter_client
@@ -369,14 +374,20 @@ impl Strategy for BuyOnEtherfuseSellOnJupiter {
             }
         }
 
-        if best_quote.is_none() {
-            return Err(anyhow::anyhow!("No profitable trades found"));
-        }
-
         println!("\n🏁 Search Complete");
         println!("Final best profit: {}", best_profit);
         println!("Final USDC amount: {}", best_usdc_amount);
         println!("Final Stablebond amount: {}", best_stablebond_amount);
+
+        if best_quote.is_none() {
+            return Err(anyhow::anyhow!("No profitable trades found"));
+        }
+
+        if best_profit < 1.0 {
+            return Err(anyhow::anyhow!(
+                "All trades were less than $1.00 USD profit"
+            ));
+        }
         let mut txs: Vec<VersionedTransaction> = Vec::new();
         if let Ok(buy_on_etherfuse_tx) = self
             .etherfuse_client
