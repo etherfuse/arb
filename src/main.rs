@@ -130,6 +130,14 @@ async fn main() -> Result<()> {
         args.etherfuse_url.clone().unwrap(),
     );
 
+    if !etherfuse_client
+        .has_kyc_account(&wallet_keypair.pubkey())
+        .await
+    {
+        println!("Etherfuse does not have a kyc account associated with this wallet. Exiting...");
+        std::process::exit(1);
+    }
+
     let rate_limiter = RateLimiter::new(1, 1);
 
     let jupiter_client = JupiterClient::new(
