@@ -1,4 +1,4 @@
-use crate::constants::{MAX_STABLEBOND_AMOUNT_PER_TRADE, MAX_USDC_AMOUNT_PER_TRADE, USDC_MINT};
+use crate::constants::{MAX_STABLEBOND_AMOUNT_PER_TRADE, USDC_MINT};
 use crate::etherfuse::EtherfuseClient;
 use crate::{jito::JitoClient, math, switchboard::SwitchboardClient};
 use anyhow::Result;
@@ -118,10 +118,8 @@ impl MarketDataBuilder {
 
     pub async fn with_usdc_holdings_token_amount(mut self) -> Self {
         let usdc_mint = Pubkey::from_str(&USDC_MINT).unwrap();
-        self.usdc_holdings_token_amount = Some(min(
-            self.get_spl_token_balance(&usdc_mint).await.unwrap_or(0),
-            MAX_USDC_AMOUNT_PER_TRADE,
-        ));
+        self.usdc_holdings_token_amount =
+            Some(self.get_spl_token_balance(&usdc_mint).await.unwrap_or(0));
         self
     }
 
@@ -131,11 +129,17 @@ impl MarketDataBuilder {
     }
 
     pub async fn with_update_switchboard_oracle_tx(mut self, stablebond_mint: &Pubkey) -> Self {
-        let payment_feed = self
+        let payment_feed = match self
             .etherfuse_client
             .fetch_payment_feed(stablebond_mint)
             .await
-            .unwrap();
+        {
+            Ok(payment_feed) => payment_feed,
+            Err(e) => {
+                println!("Error fetching payment feed: {:?}", e);
+                return self;
+            }
+        };
 
         let switchboard_public_feed = if payment_feed.quote_price_feed == Pubkey::default() {
             payment_feed.base_price_feed

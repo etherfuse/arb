@@ -105,7 +105,7 @@ impl JupiterClient {
             input_mint: stablebond_mint.clone(),
             output_mint: Pubkey::from_str(USDC_MINT).unwrap(),
             amount,
-            slippage_bps: Some(300),
+            slippage_bps: Some(100),
         };
         let quote = self.get_jupiter_quote(jupiter_quote_args).await?;
         let jup_price_usd_to_token: f64 = quote.in_amount as f64 / quote.out_amount as f64;
@@ -122,7 +122,7 @@ impl JupiterClient {
             input_mint: Pubkey::from_str(USDC_MINT).unwrap(),
             output_mint: stablebond_mint.clone(),
             amount,
-            slippage_bps: Some(300),
+            slippage_bps: Some(100),
         };
         let quote = self.get_jupiter_quote(jupiter_quote_args).await?;
         let jup_price_token_to_usd: f64 = quote.in_amount as f64 / quote.out_amount as f64;

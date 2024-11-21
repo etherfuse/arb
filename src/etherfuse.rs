@@ -329,6 +329,6 @@ impl ExchangeRateResponse {
             self.usd_to_usd,
         ]
         .into_iter()
-        .find(|&rate| rate > 0.0) // Changed from != 0.0 to > 0.0 for safety
+        .find(|&rate| rate > 0.0)
     }
 }

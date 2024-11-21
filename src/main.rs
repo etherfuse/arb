@@ -209,7 +209,10 @@ async fn main() -> Result<()> {
                 }
             }
 
-            println!("Most profitable strategy: {:?}", most_profitable_strategy);
+            println!(
+                "==================================Most profitable strategy: {:?} ==================================",
+                most_profitable_strategy
+            );
             let mut txs = most_profitable_strategy.txs;
             if let Some(update_oracle_tx) = market_data.switchboard_update_tx {
                 txs.insert(0, update_oracle_tx);

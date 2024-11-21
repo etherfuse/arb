@@ -3,8 +3,8 @@ use crate::math;
 use crate::math::{TokenAmountExt, UiAmountExt};
 use crate::{
     constants::{
-        INITIAL_POINTS, MAX_RETRIES, MAX_TRADE_PERCENT, MIN_TRADE_PERCENT, MIN_USDC_AMOUNT,
-        RETRY_DELAY_MS, STABLEBOND_DECIMALS, USDC_DECIMALS,
+        INITIAL_POINTS, MAX_RETRIES, MAX_TRADE_PERCENT, MAX_USDC_AMOUNT_PER_TRADE,
+        MIN_TRADE_PERCENT, MIN_USDC_AMOUNT, RETRY_DELAY_MS, STABLEBOND_DECIMALS, USDC_DECIMALS,
     },
     jupiter::JupiterClient,
 };
@@ -95,9 +95,6 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
         let sell_liquidity_usdc_amount = md
             .sell_liquidity_usdc_amount
             .ok_or_else(|| anyhow::anyhow!("Missing sell_liquidity_usdc_amount"))?;
-        let stablebond_holdings_token_amount = md
-            .stablebond_holdings_token_amount
-            .ok_or_else(|| anyhow::anyhow!("Missing stablebond_holdings_token_amount"))?;
         let usdc_holdings_token_amount = md
             .usdc_holdings_token_amount
             .ok_or_else(|| anyhow::anyhow!("Missing usdc_holdings_token_amount"))?;
@@ -115,17 +112,10 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
                 "Sell liquidity in USDC is required for this strategy"
             ));
         }
-        let stablebond_holdings_in_usdc_ui_amount = math::checked_float_mul(
-            stablebond_holdings_token_amount.to_ui_amount(STABLEBOND_DECIMALS),
-            etherfuse_price_per_token,
-        )?;
 
-        let max_usdc_ui_amount_to_redeem = sell_liquidity_usdc_amount
-            .to_ui_amount(USDC_DECIMALS)
-            .min(stablebond_holdings_in_usdc_ui_amount);
-
-        let max_usdc_token_amount_to_redeem =
-            math::to_token_amount(max_usdc_ui_amount_to_redeem, USDC_DECIMALS)?;
+        let max_usdc_token_amount_to_redeem = (sell_liquidity_usdc_amount
+            .min(usdc_holdings_token_amount))
+        .min(MAX_USDC_AMOUNT_PER_TRADE.to_token_amount(USDC_DECIMALS));
 
         let mut best_profit: f64 = 0.0;
         let mut best_usdc_amount = 0;
@@ -184,8 +174,8 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
                 (price_when_buying - etherfuse_price_per_token) / etherfuse_price_per_token;
 
             let potential_profit = match math::profit_from_arb(
-                price_when_buying,
                 etherfuse_price_per_token,
+                price_when_buying,
                 stablebond_amount.to_ui_amount(STABLEBOND_DECIMALS),
             ) {
                 Ok(profit) => profit,
@@ -195,13 +185,14 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
                 }
             };
 
-            println!("\nTrade Analysis:");
+            println!("\nTrade Analysis for BuyOnJupiterSellOnEtherfuse:");
             println!("Trade Size: {}% of max", trade_percent * 100.0);
-            println!("USDC Amount: {}", usdc_amount);
+            println!("USDC Amount: {}", usdc_amount.to_ui_amount(USDC_DECIMALS));
             println!("Price Impact: {:.2}%", price_impact * 100.0);
             println!("Potential Profit: {}", potential_profit);
-            println!("Buy Price: {}", price_when_buying);
-            println!("Base Price: {}", etherfuse_price_per_token);
+            println!("Buy price on jupiter: {}", price_when_buying);
+            println!("Sell price on etherfuse: {}", etherfuse_price_per_token);
+            println!("Stablebond: {:?}", stablebond_mint);
 
             if potential_profit > best_profit {
                 println!("\n🎯 New best trade found!");
@@ -280,8 +271,11 @@ impl Strategy for BuyOnEtherfuseSellOnJupiter {
         let purchase_liquidity_ui_amount_ =
             purchase_liquidity_stablebond_amount.to_ui_amount(STABLEBOND_DECIMALS);
         let max_usdc_to_purchase_ui_amount =
-            math::checked_float_mul(purchase_liquidity_ui_amount_, etherfuse_price_per_token)?
-                .min(usdc_holdings_token_amount.to_ui_amount(USDC_DECIMALS));
+            math::checked_float_mul(purchase_liquidity_ui_amount_, etherfuse_price_per_token)?.min(
+                usdc_holdings_token_amount
+                    .to_ui_amount(USDC_DECIMALS)
+                    .min(MAX_USDC_AMOUNT_PER_TRADE),
+            );
         let max_usdc_to_purchase_token_amount =
             max_usdc_to_purchase_ui_amount.to_token_amount(STABLEBOND_DECIMALS);
 
@@ -354,13 +348,14 @@ impl Strategy for BuyOnEtherfuseSellOnJupiter {
                 }
             };
 
-            println!("\nTrade Analysis:");
+            println!("\nTrade Analysis for BuyOnEtherfuseSellOnJupiter:");
             println!("Trade Size: {}% of max", trade_percent * 100.0);
-            println!("USDC Amount: {}", usdc_amount);
+            println!("USDC Amount: {}", usdc_amount.to_ui_amount(USDC_DECIMALS));
             println!("Price Impact: {:.2}%", price_impact * 100.0);
             println!("Potential Profit: {}", potential_profit);
-            println!("Sell Price: {}", price_per_token_when_selling);
-            println!("Base Price: {}", etherfuse_price_per_token);
+            println!("Buy price on etherfuse: {}", etherfuse_price_per_token);
+            println!("Sell price on jupiter: {}", price_per_token_when_selling);
+            println!("Stablebond: {:?}", stablebond_mint);
 
             if potential_profit > best_profit {
                 println!("\n🎯 New best trade found!");
