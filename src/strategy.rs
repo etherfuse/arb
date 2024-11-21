@@ -1,6 +1,5 @@
 use crate::market_data::MarketData;
 use crate::math;
-use crate::rate_limiter::RateLimiter;
 use crate::switchboard::SwitchboardClient;
 use crate::traits::{TokenAmountExt, UiAmountExt};
 use crate::{
@@ -29,7 +28,6 @@ pub trait Strategy {
 pub struct BuyEtherfuseSellJupiter {
     pub rpc_client: Arc<RpcClient>,
     pub keypair_filepath: String,
-    pub rate_limiter: RateLimiter,
     pub jupiter_client: JupiterClient,
     pub switchboard_client: SwitchboardClient,
     pub etherfuse_client: EtherfuseClient,
@@ -40,14 +38,12 @@ impl BuyEtherfuseSellJupiter {
         rpc_client: Arc<RpcClient>,
         jupiter_client: JupiterClient,
         keypair_filepath: String,
-        rate_limiter: RateLimiter,
         switchboard_client: SwitchboardClient,
         etherfuse_client: EtherfuseClient,
     ) -> Self {
         BuyEtherfuseSellJupiter {
             rpc_client,
             keypair_filepath,
-            rate_limiter,
             jupiter_client,
             switchboard_client,
             etherfuse_client,
@@ -60,7 +56,6 @@ pub struct JupiterSellBuyEtherfuse {
     pub rpc_client: Arc<RpcClient>,
     pub jupiter_client: JupiterClient,
     pub keypair_filepath: String,
-    pub rate_limiter: RateLimiter,
     pub switchboard_client: SwitchboardClient,
     pub etherfuse_client: EtherfuseClient,
 }
@@ -70,7 +65,6 @@ impl JupiterSellBuyEtherfuse {
         rpc_client: Arc<RpcClient>,
         jupiter_client: JupiterClient,
         keypair_filepath: String,
-        rate_limiter: RateLimiter,
         switchboard_client: SwitchboardClient,
         etherfuse_client: EtherfuseClient,
     ) -> Self {
@@ -78,7 +72,6 @@ impl JupiterSellBuyEtherfuse {
             rpc_client,
             jupiter_client,
             keypair_filepath,
-            rate_limiter,
             switchboard_client,
             etherfuse_client,
         }
@@ -135,7 +128,7 @@ impl Strategy for JupiterSellBuyEtherfuse {
         // let mut max_stablebond_token_amount_to_redeem =
         //     math::to_token_amount(max_stablebond_ui_amount_to_redeem, STABLEBOND_DECIMALS)?;
 
-        let mut best_profit = 0.0;
+        let mut best_profit = f64::MIN;
         let mut best_usdc_amount = 0;
         let mut best_stablebond_amount = 0;
         let mut best_quote: Option<Quote> = None;
@@ -147,8 +140,6 @@ impl Strategy for JupiterSellBuyEtherfuse {
             let mid_usdc = left + (right - left) / 2;
             let mid_stablebond = (mid_usdc as f64 / etherfuse_price_per_token) as u64;
 
-            self.rate_limiter.wait_if_needed().await;
-
             let (price_when_buying, buy_quote) = loop {
                 match self
                     .jupiter_client
@@ -158,7 +149,6 @@ impl Strategy for JupiterSellBuyEtherfuse {
                     Ok(quote) => break quote,
                     Err(e) => {
                         println!("Error getting buy quote, retrying: {}", e);
-                        self.rate_limiter.wait_if_needed().await;
                     }
                 }
             };
@@ -168,6 +158,13 @@ impl Strategy for JupiterSellBuyEtherfuse {
                 etherfuse_price_per_token,
                 mid_stablebond.to_ui_amount(STABLEBOND_DECIMALS),
             )?;
+
+            println!("Price when buying: {}", price_when_buying);
+            println!("Etherfuse price per token: {}", etherfuse_price_per_token);
+            println!("Stablebond amount: {}", mid_stablebond);
+            println!("USDC amount: {}", mid_usdc);
+            println!("buy_quote: {:?}", buy_quote);
+            println!("Profit: {}", potential_profit);
 
             if potential_profit > best_profit {
                 best_profit = potential_profit;
@@ -256,7 +253,7 @@ impl Strategy for BuyEtherfuseSellJupiter {
         // let stablebond_token_amount_to_sell =
         //     stablebond_ui_amount_to_sell.to_token_amount(STABLEBOND_DECIMALS);
 
-        let mut best_profit = 0.0;
+        let mut best_profit = f64::MIN;
         let mut best_usdc_amount = 0;
         let mut best_stablebond_amount = 0;
         let mut best_quote: Option<Quote> = None;
@@ -268,8 +265,6 @@ impl Strategy for BuyEtherfuseSellJupiter {
             let mid_usdc = left + (right - left) / 2;
             let mid_stablebond = (mid_usdc as f64 / etherfuse_price_per_token) as u64;
 
-            self.rate_limiter.wait_if_needed().await;
-
             let (price_per_token_when_selling, sell_quote) = loop {
                 match self
                     .jupiter_client
@@ -279,7 +274,6 @@ impl Strategy for BuyEtherfuseSellJupiter {
                     Ok(quote) => break quote,
                     Err(e) => {
                         println!("Error getting sell quote, retrying: {}", e);
-                        self.rate_limiter.wait_if_needed().await;
                     }
                 }
             };
@@ -289,6 +283,13 @@ impl Strategy for BuyEtherfuseSellJupiter {
                 etherfuse_price_per_token,
                 mid_stablebond.to_ui_amount(STABLEBOND_DECIMALS),
             )?;
+
+            println!("Price when selling: {}", price_per_token_when_selling);
+            println!("Etherfuse price per token: {}", etherfuse_price_per_token);
+            println!("Stablebond amount: {}", mid_stablebond);
+            println!("USDC amount: {}", mid_usdc);
+            println!("sell_quote: {:?}", sell_quote);
+            println!("Profit: {}", potential_profit);
 
             if potential_profit > best_profit {
                 best_profit = potential_profit;

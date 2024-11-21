@@ -28,9 +28,9 @@ use solana_program::pubkey::Pubkey;
 use solana_sdk::{
     commitment_config::CommitmentConfig, signature::read_keypair_file, signer::Signer,
 };
-use std::fs;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::{fs, time::Duration};
 use strategy::{BuyEtherfuseSellJupiter, JupiterSellBuyEtherfuse, StrategyEnum, StrategyResult};
 use toml::Value;
 
@@ -131,20 +131,20 @@ async fn main() -> Result<()> {
         args.etherfuse_url.clone().unwrap(),
     );
 
+    let rate_limiter = RateLimiter::new(1, 1);
+
     let jupiter_client = JupiterClient::new(
         args.jupiter_quote_url.clone().unwrap(),
         keypair_filepath.clone(),
+        rate_limiter.clone(),
     );
 
     let switchboard_client = SwitchboardClient::new(rpc_client.clone(), keypair_filepath.clone());
-
-    let rate_limiter = RateLimiter::new(10, 10);
 
     let buy_etherfuse_sell_jupiter = BuyEtherfuseSellJupiter::new(
         rpc_client.clone(),
         jupiter_client.clone(),
         keypair_filepath.clone(),
-        rate_limiter.clone(),
         switchboard_client.clone(),
         etherfuse_client.clone(),
     );
@@ -153,7 +153,6 @@ async fn main() -> Result<()> {
         rpc_client.clone(),
         jupiter_client.clone(),
         keypair_filepath.clone(),
-        rate_limiter.clone(),
         switchboard_client.clone(),
         etherfuse_client.clone(),
     );
@@ -207,6 +206,7 @@ async fn main() -> Result<()> {
             //     Err(e) => println!("Error sending bundle: {:?}", e),
             // }
         }
+        tokio::time::sleep(Duration::from_secs(60 * 5)).await;
     }
 }
 

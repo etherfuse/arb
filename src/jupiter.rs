@@ -1,6 +1,7 @@
 use crate::args::JupiterQuoteArgs;
 use crate::constants::USDC_MINT;
 use crate::field_as_string;
+use crate::rate_limiter::RateLimiter;
 use solana_sdk::signature::{read_keypair_file, Keypair};
 use solana_sdk::signer::Signer;
 use std::str::FromStr;
@@ -19,13 +20,19 @@ use {
 pub struct JupiterClient {
     pub jupiter_quote_url: String,
     pub keypair_filepath: String,
+    pub rate_limiter: RateLimiter,
 }
 
 impl JupiterClient {
-    pub fn new(jupiter_quote_url: String, keypair_filepath: String) -> Self {
+    pub fn new(
+        jupiter_quote_url: String,
+        keypair_filepath: String,
+        rate_limiter: RateLimiter,
+    ) -> Self {
         JupiterClient {
             jupiter_quote_url,
             keypair_filepath,
+            rate_limiter,
         }
     }
 
@@ -40,7 +47,7 @@ impl JupiterClient {
         Ok(signed_tx)
     }
 
-    pub async fn get_jupiter_quote(&self, args: JupiterQuoteArgs) -> Result<Quote> {
+    pub async fn get_jupiter_quote(&mut self, args: JupiterQuoteArgs) -> Result<Quote> {
         let url = format!(
             "{}/quote?inputMint={}&outputMint={}&amount={}&slippageBps={}",
             self.jupiter_quote_url,
@@ -50,11 +57,12 @@ impl JupiterClient {
             args.slippage_bps.unwrap_or(300),
         );
 
+        self.rate_limiter.wait_if_needed().await;
         let quote = maybe_jupiter_api_error(reqwest::get(url).await?.json().await?)?;
         Ok(quote)
     }
 
-    pub async fn jupiter_swap_tx(&self, quote: Quote) -> Result<VersionedTransaction> {
+    pub async fn jupiter_swap_tx(&mut self, quote: Quote) -> Result<VersionedTransaction> {
         let url = format!("{}/swap", self.jupiter_quote_url);
 
         let request = SwapRequest {
@@ -68,6 +76,7 @@ impl JupiterClient {
             time_taken: quote.time_taken,
         };
 
+        self.rate_limiter.wait_if_needed().await;
         let response = maybe_jupiter_api_error::<SwapResponse>(
             reqwest::Client::builder()
                 .build()?
@@ -88,7 +97,11 @@ impl JupiterClient {
         self.sign_tx(swap_transaction)
     }
 
-    pub async fn sell_quote(&self, stablebond_mint: &Pubkey, amount: u64) -> Result<(f64, Quote)> {
+    pub async fn sell_quote(
+        &mut self,
+        stablebond_mint: &Pubkey,
+        amount: u64,
+    ) -> Result<(f64, Quote)> {
         let jupiter_quote_args = JupiterQuoteArgs {
             input_mint: stablebond_mint.clone(),
             output_mint: Pubkey::from_str(USDC_MINT).unwrap(),
@@ -101,7 +114,11 @@ impl JupiterClient {
         Ok((jup_price_token_to_usd, quote))
     }
 
-    pub async fn buy_quote(&self, stablebond_mint: &Pubkey, amount: u64) -> Result<(f64, Quote)> {
+    pub async fn buy_quote(
+        &mut self,
+        stablebond_mint: &Pubkey,
+        amount: u64,
+    ) -> Result<(f64, Quote)> {
         let jupiter_quote_args = JupiterQuoteArgs {
             input_mint: Pubkey::from_str(USDC_MINT).unwrap(),
             output_mint: stablebond_mint.clone(),
