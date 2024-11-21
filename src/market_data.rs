@@ -77,7 +77,7 @@ impl MarketDataBuilder {
             self.etherfuse_client
                 .fetch_sell_liquidity_usdc_amount(&find_bond_pda(*stablebond_mint).0)
                 .await
-                .unwrap(),
+                .unwrap_or(0),
         );
         self
     }
@@ -86,7 +86,7 @@ impl MarketDataBuilder {
         self.stablebond_holdings_token_amount = Some(min(
             self.get_spl_token_22_balance(stablebond_mint)
                 .await
-                .unwrap(),
+                .unwrap_or(0),
             MAX_STABLEBOND_AMOUNT_PER_TRADE,
         ));
         self
@@ -95,7 +95,7 @@ impl MarketDataBuilder {
     pub async fn with_usdc_holdings_token_amount(mut self) -> Self {
         let usdc_mint = Pubkey::from_str(&USDC_MINT).unwrap();
         self.usdc_holdings_token_amount = Some(min(
-            self.get_spl_token_balance(&usdc_mint).await.unwrap(),
+            self.get_spl_token_balance(&usdc_mint).await.unwrap_or(0),
             MAX_USDC_AMOUNT_PER_TRADE,
         ));
         self
@@ -115,7 +115,7 @@ impl MarketDataBuilder {
 
         if let Some(token_account) = token_account {
             return Ok(math::to_token_amount(
-                token_account.token_amount.ui_amount.unwrap(),
+                token_account.token_amount.ui_amount.unwrap_or(0.0),
                 token_account.token_amount.decimals,
             )
             .unwrap());
@@ -136,7 +136,7 @@ impl MarketDataBuilder {
 
         if let Some(token_account) = token_account {
             return Ok(math::to_token_amount(
-                token_account.token_amount.ui_amount.unwrap(),
+                token_account.token_amount.ui_amount.unwrap_or(0.0),
                 token_account.token_amount.decimals,
             )
             .unwrap());

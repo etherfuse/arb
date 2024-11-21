@@ -91,7 +91,7 @@ pub enum StrategyEnum {
     JupiterSellBuyEtherfuse,
 }
 
-impl Strategy for BuyEtherfuseSellJupiter {
+impl Strategy for JupiterSellBuyEtherfuse {
     async fn process_market_data(
         &mut self,
         md: &MarketData,
@@ -107,11 +107,15 @@ impl Strategy for BuyEtherfuseSellJupiter {
             .etherfuse_price_per_token
             .ok_or_else(|| anyhow::anyhow!("Missing etherfuse_price_per_token"))?;
 
+        if stablebond_holdings_token_amount == 0 {
+            return Err(anyhow::anyhow!(
+                "Existing stablebond holdings are required for this strategy"
+            ));
+        }
         if sell_liquidity_usdc_amount == 0 {
-            return Ok(StrategyResult {
-                profit: 0.0,
-                txs: Vec::new(),
-            });
+            return Err(anyhow::anyhow!(
+                "Sell liquidity in USDC is required for this strategy"
+            ));
         }
         let stablebond_holdings_in_usdc_ui_amount = math::checked_float_mul(
             stablebond_holdings_token_amount.to_ui_amount(STABLEBOND_DECIMALS),
@@ -175,6 +179,11 @@ impl Strategy for BuyEtherfuseSellJupiter {
                 right = mid_usdc - 1;
             }
         }
+        if best_quote.is_none() {
+            return Err(anyhow::anyhow!(
+                "No quote found for the strategy JupiterSellBuyEtherfuse",
+            ));
+        }
         println!(
             "Jupiter Buy -> Etherfuse Sell\nUSDC Amount: {}\nStablebond Amount: {}\nProfit: {}",
             token_amount_to_ui_amount(best_usdc_amount, USDC_DECIMALS).ui_amount_string,
@@ -215,7 +224,7 @@ impl Strategy for BuyEtherfuseSellJupiter {
     }
 }
 
-impl Strategy for JupiterSellBuyEtherfuse {
+impl Strategy for BuyEtherfuseSellJupiter {
     async fn process_market_data(
         &mut self,
         md: &MarketData,
@@ -227,6 +236,12 @@ impl Strategy for JupiterSellBuyEtherfuse {
         let etherfuse_price_per_token = md
             .etherfuse_price_per_token
             .ok_or_else(|| anyhow::anyhow!("Missing etherfuse_price_per_token"))?;
+
+        if usdc_holdings_token_amount == 0 {
+            return Err(anyhow::anyhow!(
+                "USDC holdings are required for this strategy"
+            ));
+        }
 
         let max_usdc_ui_amount_to_purchase =
             math::checked_float_mul(usdc_holdings_token_amount.to_ui_amount(USDC_DECIMALS), 0.99)?;
@@ -284,6 +299,12 @@ impl Strategy for JupiterSellBuyEtherfuse {
             } else {
                 right = mid_usdc - 1;
             }
+        }
+
+        if best_quote.is_none() {
+            return Err(anyhow::anyhow!(
+                "No quote found for the strategy BuyEtherfuseSellJupiter",
+            ));
         }
 
         println!(

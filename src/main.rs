@@ -28,9 +28,11 @@ use solana_program::pubkey::Pubkey;
 use solana_sdk::{
     commitment_config::CommitmentConfig, signature::read_keypair_file, signer::Signer,
 };
+use std::fs;
 use std::str::FromStr;
 use std::sync::Arc;
 use strategy::{BuyEtherfuseSellJupiter, JupiterSellBuyEtherfuse, StrategyEnum, StrategyResult};
+use toml::Value;
 
 #[derive(Parser)]
 #[command(about, version)]
@@ -87,19 +89,13 @@ struct Args {
         global = true
     )]
     jito_bundles_url: Option<String>,
-
-    #[arg(
-        long,
-        value_name = "STABLEBOND_MINT",
-        help = "The stablebond mint",
-        global = true
-    )]
-    stablebond_mint: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    let stablebond_mints = parse_toml_config().unwrap();
+    println!("Stablebond mints: {:?}", stablebond_mints);
 
     let cli_config = if let Some(config_file) = &args.config_file {
         solana_cli_config::Config::load(config_file).unwrap_or_else(|_| {
@@ -144,8 +140,6 @@ async fn main() -> Result<()> {
 
     let rate_limiter = RateLimiter::new(10, 10);
 
-    let stablebond_mint = Pubkey::from_str(&args.stablebond_mint.unwrap()).unwrap();
-
     let buy_etherfuse_sell_jupiter = BuyEtherfuseSellJupiter::new(
         rpc_client.clone(),
         jupiter_client.clone(),
@@ -165,47 +159,72 @@ async fn main() -> Result<()> {
     );
 
     loop {
-        let market_data: MarketData = MarketDataBuilder::new(
-            rpc_client.clone(),
-            wallet_keypair.pubkey(),
-            etherfuse_client.clone(),
-            jito_client.clone(),
-        )
-        .with_etherfuse_price_per_token(&stablebond_mint)
-        .await
-        .with_sell_liquidity_usdc_amount(&stablebond_mint)
-        .await
-        .with_stablebond_holdings_token_amount(&stablebond_mint)
-        .await
-        .with_usdc_holdings_token_amount()
-        .await
-        .with_jito_tip()
-        .await
-        .build();
+        for stablebond_mint in &stablebond_mints {
+            let market_data: MarketData = MarketDataBuilder::new(
+                rpc_client.clone(),
+                wallet_keypair.pubkey(),
+                etherfuse_client.clone(),
+                jito_client.clone(),
+            )
+            .with_etherfuse_price_per_token(&stablebond_mint)
+            .await
+            .with_sell_liquidity_usdc_amount(&stablebond_mint)
+            .await
+            .with_stablebond_holdings_token_amount(&stablebond_mint)
+            .await
+            .with_usdc_holdings_token_amount()
+            .await
+            .with_jito_tip()
+            .await
+            .build();
 
-        let strategies = TradingEngine::new()
-            .add_strategy(StrategyEnum::BuyEtherfuseSellJupiter(
-                buy_etherfuse_sell_jupiter.clone(),
-            ))
-            .add_strategy(StrategyEnum::JupiterSellBuyEtherfuse(
-                jupiter_sell_buy_etherfuse.clone(),
-            ))
-            .run_strategies(&market_data, &stablebond_mint)
-            .await;
+            let strategies = TradingEngine::new()
+                .add_strategy(StrategyEnum::BuyEtherfuseSellJupiter(
+                    buy_etherfuse_sell_jupiter.clone(),
+                ))
+                .add_strategy(StrategyEnum::JupiterSellBuyEtherfuse(
+                    jupiter_sell_buy_etherfuse.clone(),
+                ))
+                .run_strategies(&market_data, &stablebond_mint)
+                .await;
 
-        let mut most_profitable_strategy: StrategyResult = strategies[0].clone();
-        for s in strategies {
-            if s.profit > most_profitable_strategy.profit {
-                most_profitable_strategy = s.clone();
+            if strategies.is_empty() {
+                println!("No strategies found for {:?}", stablebond_mint);
+                continue;
+            }
+
+            let mut most_profitable_strategy: StrategyResult = strategies[0].clone();
+            for s in strategies {
+                if s.profit > most_profitable_strategy.profit {
+                    most_profitable_strategy = s.clone();
+                }
+            }
+
+            println!("Most profitable strategy: {:?}", most_profitable_strategy);
+
+            // match jito_client.send_bundle(&most_profitable_strategy.txs).await {
+            //     Ok(v) => println!("Bundle sent successfully: {:?}", v),
+            //     Err(e) => println!("Error sending bundle: {:?}", e),
+            // }
+        }
+    }
+}
+
+fn parse_toml_config() -> Result<Vec<Pubkey>> {
+    // Changed return type to return the Vec
+    let toml_str = fs::read_to_string("tokens.toml")?;
+    let value = toml_str.parse::<Value>()?;
+
+    let mut result: Vec<Pubkey> = Vec::new();
+
+    // Since we know the structure is { tokens: [...] }, we can access it directly
+    if let Some(tokens) = value.get("tokens").and_then(|v| v.as_array()) {
+        for token in tokens {
+            if let Some(s) = token.as_str() {
+                result.push(Pubkey::from_str(s).unwrap());
             }
         }
-
-        println!("Most profitable strategy: {:?}", most_profitable_strategy);
-
-        match jito_client.send_bundle(&most_profitable_strategy.txs).await {
-            Ok(v) => println!("Bundle sent successfully: {:?}", v),
-            Err(e) => println!("Error sending bundle: {:?}", e),
-        }
-        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
     }
+
+    Ok(result) // Return the Vec instead of ()
 }

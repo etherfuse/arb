@@ -16,10 +16,12 @@ use stablebond_sdk::instructions::{InstantBondRedemption, InstantBondRedemptionI
 use std::str::FromStr;
 use std::sync::Arc;
 
+use lazy_static::lazy_static;
 use spl_associated_token_account::{
     get_associated_token_address, get_associated_token_address_with_program_id,
 };
 use spl_token::state::Account as TokenAccount;
+use std::collections::HashMap;
 
 use stablebond_sdk::{
     accounts::{Bond, PaymentFeed, SellLiquidity},
@@ -33,6 +35,29 @@ use crate::args::InstantBondRedemptionArgs;
 use crate::{
     args::PurchaseArgs, constants::USDC_MINT, field_as_string, transaction::build_and_sign_tx,
 };
+
+lazy_static! {
+    static ref EXCHANGE_RATE_CONFIGS: HashMap<Pubkey, &'static str> = {
+        let mut m = HashMap::new();
+        m.insert(
+            Pubkey::from_str("CETES7CKqqKQizuSN6iWQwmTeFRjbJR6Vw2XRKfEDR8f").unwrap(),
+            "https://api.etherfuse.com/lookup/exchange_rate/usd_to_mxn",
+        );
+        m.insert(
+            Pubkey::from_str("USTRYnGgcHAhdWsanv8BG6vHGd4p7UGgoB9NRd8ei7j").unwrap(),
+            "https://api.etherfuse.com/lookup/exchange_rate/usd_to_usd",
+        );
+        m.insert(
+            Pubkey::from_str("GiLTSeSFnNse7xQVYeKdMyckGw66AoRmyggGg1NNd4yr").unwrap(),
+            "https://api.etherfuse.com/lookup/exchange_rate/usd_to_gbp",
+        );
+        m.insert(
+            Pubkey::from_str("EuroszHk1AL7fHBBsxgeGHsamUqwBpb26oEyt9BcfZ6G").unwrap(),
+            "https://api.etherfuse.com/lookup/exchange_rate/usd_to_eur",
+        );
+        m
+    };
+}
 
 #[derive(Clone)]
 pub struct EtherfuseClient {
@@ -201,17 +226,36 @@ impl EtherfuseClient {
         let res: BondCostResponse = reqwest::get(url).await?.json().await?;
         let token_value = res.bond_cost_in_payment_token;
 
-        let exchange_rate = self.get_etherfuse_exchange_rate().await?;
-        // Convert MXN price to USD by dividing by the exchange rate
-        let price_in_usd = token_value / exchange_rate;
-        Ok(price_in_usd)
+        match self.get_etherfuse_exchange_rate(*mint).await {
+            Ok(exchange_rate) => {
+                let price_in_usd = token_value / exchange_rate;
+                Ok(price_in_usd)
+            }
+            Err(e) => {
+                println!("Error getting etherfuse exchange rate: {:?}", e);
+                Err(e)
+            }
+        }
     }
 
-    async fn get_etherfuse_exchange_rate(&self) -> Result<f64> {
-        let url = "https://api.etherfuse.com/lookup/exchange_rate/usd_to_mxn";
-        let res: ExchangeRateResponse = reqwest::get(url).await?.json().await?;
-        let price = res.usd_to_mxn;
-        Ok(price)
+    async fn get_etherfuse_exchange_rate(&self, stablebond_mint: Pubkey) -> Result<f64> {
+        let url = EXCHANGE_RATE_CONFIGS
+            .get(&stablebond_mint)
+            .ok_or_else(|| anyhow::anyhow!("Unsupported stablebond mint"))?;
+
+        let response = reqwest::get(*url).await?;
+
+        // Debug the response
+        println!("Response status: {}", response.status());
+        let text = response.text().await?;
+        println!("Response body: {}", text);
+
+        // Try to parse the response
+        let res: ExchangeRateResponse = serde_json::from_str(&text)
+            .map_err(|e| anyhow::anyhow!("Failed to parse response: {}, body: {}", e, text))?;
+
+        res.get_rate()
+            .ok_or_else(|| anyhow::anyhow!("No valid exchange rate found in response"))
     }
 
     #[allow(dead_code)]
@@ -301,6 +345,25 @@ pub struct BondCostResponse {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ExchangeRateResponse {
-    #[serde(with = "field_as_string")]
+    #[serde(with = "field_as_string", default)]
     pub usd_to_mxn: f64,
+    #[serde(with = "field_as_string", default)]
+    pub usd_to_gbp: f64,
+    #[serde(with = "field_as_string", default)]
+    pub usd_to_eur: f64,
+    #[serde(with = "field_as_string", default)]
+    pub usd_to_usd: f64,
+}
+
+impl ExchangeRateResponse {
+    pub fn get_rate(&self) -> Option<f64> {
+        [
+            self.usd_to_mxn,
+            self.usd_to_gbp,
+            self.usd_to_eur,
+            self.usd_to_usd,
+        ]
+        .into_iter()
+        .find(|&rate| rate > 0.0) // Changed from != 0.0 to > 0.0 for safety
+    }
 }

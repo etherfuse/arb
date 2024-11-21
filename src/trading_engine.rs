@@ -24,8 +24,9 @@ impl TradingEngine {
     ) -> Vec<StrategyResult> {
         let mut results: Vec<crate::strategy::StrategyResult> = Vec::new();
         for strategy in &mut self.strategies {
-            if let Ok(result) = strategy.process_market_data(md, stablebond_mint).await {
-                results.push(result);
+            match strategy.process_market_data(md, stablebond_mint).await {
+                Ok(result) => results.push(result),
+                Err(e) => println!("Error processing market data: {:?}", e),
             }
         }
         println!("Results: {:?}", results);
