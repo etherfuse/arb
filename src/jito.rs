@@ -66,7 +66,11 @@ impl JitoClient {
         let resp: Result<String, _> = self.jsonrpc_client.request("sendBundle", params).await;
         match resp {
             Ok(bundle) => {
-                println!("https://explorer.jito.wtf/bundle/{bundle}");
+                let now = chrono::Local::now();
+                println!(
+                    "[{}] https://explorer.jito.wtf/bundle/{bundle}",
+                    now.format("%Y-%m-%d %H:%M:%S")
+                );
                 match self.check_bundle_status(&bundle).await {
                     Ok(BundleStatusEnum::Landed) => println!("Bundle landed successfully"),
                     Ok(BundleStatusEnum::Failed) => println!("Bundle failed to land"),
