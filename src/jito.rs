@@ -43,7 +43,6 @@ impl JitoClient {
     }
 
     pub async fn send_bundle(&mut self, txs: &[VersionedTransaction]) -> Result<()> {
-        // let jito_tip = self.get_jito_tip().await?;
         let jito_tip = self.wss_client.read().unwrap();
 
         let tippers: Vec<String> = self
