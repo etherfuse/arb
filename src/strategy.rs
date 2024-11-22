@@ -208,8 +208,14 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
 
         println!("\n🏁 Search Complete");
         println!("Final best profit: {}", best_profit);
-        println!("Final USDC amount: {}", best_usdc_amount);
-        println!("Final Stablebond amount: {}", best_stablebond_amount);
+        println!(
+            "Final USDC amount: {}",
+            best_usdc_amount.to_ui_amount(USDC_DECIMALS)
+        );
+        println!(
+            "Final Stablebond amount: {}",
+            best_stablebond_amount.to_ui_amount(STABLEBOND_DECIMALS)
+        );
 
         if best_quote.is_none() {
             return Err(anyhow::anyhow!("No profitable trades found"));
