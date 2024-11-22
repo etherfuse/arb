@@ -221,7 +221,7 @@ async fn main() -> Result<()> {
                 println!("Error sending bundle: {:?}", e)
             }
         }
-        tokio::time::sleep(Duration::from_secs(60 * 5)).await;
+        tokio::time::sleep(Duration::from_secs(60 * 1)).await;
     }
 }
 
