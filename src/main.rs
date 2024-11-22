@@ -266,8 +266,8 @@ async fn main() -> Result<()> {
                 println!("Error sending bundle: {:?}", e)
             }
         }
-        println!("========== Sleeping for 1 minute ==========");
-        tokio::time::sleep(Duration::from_secs(60 * 1)).await;
+        println!("========== Sleeping for 5 minutes ==========");
+        tokio::time::sleep(Duration::from_secs(60 * 5)).await;
     }
 }
 
