@@ -178,7 +178,7 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
                 price_when_buying,
                 stablebond_amount.to_ui_amount(STABLEBOND_DECIMALS),
             ) {
-                Ok(profit) => profit - md.jito_tip_usd_price.unwrap_or(0.0),
+                Ok(profit) => profit - md.jito_tip_usd_price.unwrap_or(0.10),
                 Err(e) => {
                     println!("Error calculating profit: {}. Skipping.", e);
                     continue;
@@ -189,7 +189,7 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
             println!("Trade Size: {}% of max", trade_percent * 100.0);
             println!("USDC Amount: {}", usdc_amount.to_ui_amount(USDC_DECIMALS));
             println!("Price Impact: {:.2}%", price_impact * 100.0);
-            println!("Jito tip usd price: {}", md.jito_tip_usd_price.unwrap_or(0.0));
+            println!("Jito tip usd price: {}", md.jito_tip_usd_price.unwrap_or(0.10));
             println!("Potential Profit: {}", potential_profit);
             println!("Buy price on jupiter: {}", price_when_buying);
             println!("Sell price on etherfuse: {}", etherfuse_price_per_token);
@@ -348,7 +348,7 @@ impl Strategy for BuyOnEtherfuseSellOnJupiter {
                 etherfuse_price_per_token,
                 stablebond_amount.to_ui_amount(STABLEBOND_DECIMALS),
             ) {
-                Ok(profit) => profit - md.jito_tip_usd_price.unwrap_or(0.0),
+                Ok(profit) => profit - md.jito_tip_usd_price.unwrap_or(0.10),
                 Err(e) => {
                     println!("Error calculating profit: {}. Skipping.", e);
                     continue;
@@ -359,7 +359,7 @@ impl Strategy for BuyOnEtherfuseSellOnJupiter {
             println!("Trade Size: {}% of max", trade_percent * 100.0);
             println!("USDC Amount: {}", usdc_amount.to_ui_amount(USDC_DECIMALS));
             println!("Price Impact: {:.2}%", price_impact * 100.0);
-            println!("Jito tip usd price: {}", md.jito_tip_usd_price.unwrap_or(0.0));
+            println!("Jito tip usd price: {}", md.jito_tip_usd_price.unwrap_or(0.10));
             println!("Potential Profit: {}", potential_profit);
             println!("Buy price on etherfuse: {}", etherfuse_price_per_token);
             println!("Sell price on jupiter: {}", price_per_token_when_selling);
