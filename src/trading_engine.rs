@@ -21,10 +21,11 @@ impl TradingEngine {
         &mut self,
         md: &MarketData,
         stablebond_mint: &Pubkey,
+        jito_tip_usd_price: &f64,
     ) -> Vec<StrategyResult> {
         let mut results: Vec<crate::strategy::StrategyResult> = Vec::new();
         for strategy in &mut self.strategies {
-            match strategy.process_market_data(md, stablebond_mint).await {
+            match strategy.process_market_data(md, stablebond_mint, jito_tip_usd_price).await {
                 Ok(result) => results.push(result),
                 Err(e) => println!("Error processing market data: {:?}", e),
             }

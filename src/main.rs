@@ -32,6 +32,8 @@ use strategy::{
     BuyOnEtherfuseSellOnJupiter, BuyOnJupiterSellOnEtherfuse, StrategyEnum, StrategyResult,
 };
 use toml::Value;
+use reqwest;
+use serde_json::Value as JsonValue;
 
 #[derive(Parser)]
 #[command(about, version)]
@@ -88,6 +90,15 @@ struct Args {
         global = true
     )]
     jito_bundles_url: Option<String>,
+}
+
+async fn get_sol_price() -> Result<f64> {
+    let resp = reqwest::get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd")
+        .await?
+        .text()
+        .await?;
+    let v: JsonValue = serde_json::from_str(&resp)?;
+    Ok(v["solana"]["usd"].as_f64().unwrap_or(0.0))
 }
 
 #[tokio::main]
@@ -162,7 +173,16 @@ async fn main() -> Result<()> {
         etherfuse_client.clone(),
     );
 
-    loop {
+    loop {        
+        let sol_price = match get_sol_price().await {
+            Ok(price) => price,
+            Err(e) => {
+                println!("Error fetching SOL price: {:?}", e);
+                0.0
+            }
+        };
+        println!("Current SOL price: ${:.2}", sol_price);
+        
         for stablebond_mint in &stablebond_mints {
             let market_data: MarketData = MarketDataBuilder::new(
                 rpc_client.clone(),
@@ -187,6 +207,12 @@ async fn main() -> Result<()> {
             .await
             .build();
 
+            let jito_tip_usd_price = if sol_price == 0.0 {
+                0.0
+            } else {
+                market_data.jito_tip.map(|tip| (tip as f64) / 1e9 * sol_price).unwrap_or(0.0)
+            };
+
             let strategies = TradingEngine::new()
                 .add_strategy(StrategyEnum::BuyOnEtherfuseSellOnJupiter(
                     buy_on_etherfuse_sell_on_jupiter.clone(),
@@ -194,7 +220,7 @@ async fn main() -> Result<()> {
                 .add_strategy(StrategyEnum::BuyOnJupiterSellOnEtherfuse(
                     buy_on_jupiter_sell_on_etherfuse.clone(),
                 ))
-                .run_strategies(&market_data, &stablebond_mint)
+                .run_strategies(&market_data, &stablebond_mint,&jito_tip_usd_price)
                 .await;
 
             if strategies.is_empty() {
@@ -221,6 +247,7 @@ async fn main() -> Result<()> {
                 println!("Error sending bundle: {:?}", e)
             }
         }
+        println!("========== Sleeping for 1 minute ==========");
         tokio::time::sleep(Duration::from_secs(60 * 1)).await;
     }
 }
