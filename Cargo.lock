@@ -1469,12 +1469,13 @@ dependencies = [
 
 [[package]]
 name = "etherfuse-arb"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "base58",
  "base64 0.13.1",
  "bincode",
+ "chrono",
  "clap 4.5.16",
  "colored",
  "enum_dispatch",

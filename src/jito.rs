@@ -18,19 +18,22 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct JitoClient {
     pub rpc_client: Arc<RpcClient>,
-    pub keypair_filepath: String,
+    pub wss_client: Arc<std::sync::RwLock<u64>>,    
     pub jsonrpc_client: HttpClient,
+    pub keypair_filepath: String,
 }
 
 impl JitoClient {
     pub fn new(
         rpc_client: Arc<RpcClient>,
+        wss_client: Arc<std::sync::RwLock<u64>>,
         jsonrpc_client: HttpClient,
         keypair_filepath: String,
     ) -> Self {
         Self {
             rpc_client,
             keypair_filepath,
+            wss_client,
             jsonrpc_client,
         }
     }
@@ -40,7 +43,7 @@ impl JitoClient {
     }
 
     pub async fn send_bundle(&mut self, txs: &[VersionedTransaction]) -> Result<()> {
-        let jito_tip = self.get_jito_tip().await?;
+        let jito_tip = self.wss_client.read().unwrap();
 
         let tippers: Vec<String> = self
             .jsonrpc_client
@@ -50,10 +53,10 @@ impl JitoClient {
         let tip_ix = system_instruction::transfer(
             &self.signer().pubkey(),
             &Pubkey::try_from(tippers[0].to_string().as_str()).unwrap(),
-            jito_tip,
+            *jito_tip,
         );
         // print amount in sol not lamports
-        println!("SOL tip: {:?}", jito_tip as f64 / LAMPORTS_PER_SOL as f64);
+        println!("SOL (Jito) tip: {:?}", (*jito_tip as f64) / (LAMPORTS_PER_SOL as f64));
         let tip_tx = build_and_sign_tx(&self.rpc_client, &self.signer(), &[tip_ix]).await?;
 
         let txs: Vec<String> = [txs, &[tip_tx]]
@@ -66,7 +69,11 @@ impl JitoClient {
         let resp: Result<String, _> = self.jsonrpc_client.request("sendBundle", params).await;
         match resp {
             Ok(bundle) => {
-                println!("https://explorer.jito.wtf/bundle/{bundle}");
+                let now = chrono::Local::now();
+                println!(
+                    "[{}] https://explorer.jito.wtf/bundle/{bundle}",
+                    now.format("%Y-%m-%d %H:%M:%S")
+                );
                 match self.check_bundle_status(&bundle).await {
                     Ok(BundleStatusEnum::Landed) => println!("Bundle landed successfully"),
                     Ok(BundleStatusEnum::Failed) => println!("Bundle failed to land"),
@@ -175,3 +182,4 @@ enum BundleStatusEnum {
     Unknown,
     Timeout,
 }
+
