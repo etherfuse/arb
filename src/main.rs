@@ -10,6 +10,7 @@ mod strategy;
 mod switchboard;
 mod trading_engine;
 mod transaction;
+mod coingecko;
 
 use crate::{
     etherfuse::EtherfuseClient, jito::JitoClient, jupiter::JupiterClient,
@@ -26,14 +27,18 @@ use solana_sdk::{
     commitment_config::CommitmentConfig, signature::read_keypair_file, signer::Signer,
 };
 use std::str::FromStr;
-use std::sync::Arc;
+use std::{sync::Arc, sync::RwLock};
 use std::{fs, time::Duration};
+
 use strategy::{
     BuyOnEtherfuseSellOnJupiter, BuyOnJupiterSellOnEtherfuse, StrategyEnum, StrategyResult,
 };
 use toml::Value;
-use reqwest;
-use serde_json::Value as JsonValue;
+
+use futures::StreamExt;
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::protocol::Message;
+use crate::jito::Tip;
 
 #[derive(Parser)]
 #[command(about, version)]
@@ -90,16 +95,17 @@ struct Args {
         global = true
     )]
     jito_bundles_url: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "JITO_WSS_URL",
+        help = "URL to the Jito WSS API",
+        default_value = "ws://bundles-api-rest.jito.wtf/api/v1/bundles/tip_stream",
+        global = true
+    )]
+    jito_wss_url: Option<String>,
 }
 
-async fn get_sol_price() -> Result<f64> {
-    let resp = reqwest::get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd")
-        .await?
-        .text()
-        .await?;
-    let v: JsonValue = serde_json::from_str(&resp)?;
-    Ok(v["solana"]["usd"].as_f64().unwrap_or(0.0))
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -127,10 +133,30 @@ async fn main() -> Result<()> {
     ));
 
     let jito_jsonrpc_client: HttpClient = HttpClientBuilder::default()
-        .build(args.jito_bundles_url.clone().unwrap())
-        .expect("Error");
+    .build(args.jito_bundles_url.clone().unwrap())
+    .expect("Error");
+
+    let jito_tip_ws = Arc::new(RwLock::new(0_u64));
+    let jito_tip_ws_clone = Arc::clone(&jito_tip_ws);    
+    let (ws_stream, _) = connect_async(args.jito_wss_url.clone().unwrap()).await.unwrap();
+    let (_, mut read) = ws_stream.split();
+
+    tokio::spawn(async move {
+        while let Some(message) = read.next().await {
+            if let Ok(Message::Text(text)) = message {
+                if let Ok(tips) = serde_json::from_str::<Vec<Tip>>(&text) {
+                    for item in tips {
+                        let mut jito_tip_ws = jito_tip_ws_clone.write().unwrap();
+                        *jito_tip_ws = (item.landed_tips_50th_percentile * (10_f64).powf(9.0)) as u64;
+                    }
+                }
+            }
+        }
+    });
+
     let mut jito_client = JitoClient::new(
         rpc_client.clone(),
+        jito_tip_ws,
         jito_jsonrpc_client,
         keypair_filepath.clone(),
     );
@@ -174,15 +200,6 @@ async fn main() -> Result<()> {
     );
 
     loop {        
-        let sol_price = match get_sol_price().await {
-            Ok(price) => price,
-            Err(e) => {
-                println!("Error fetching SOL price: {:?}", e);
-                0.0
-            }
-        };
-        println!("Current SOL price: ${:.2}", sol_price);
-        
         for stablebond_mint in &stablebond_mints {
             let market_data: MarketData = MarketDataBuilder::new(
                 rpc_client.clone(),
@@ -201,16 +218,18 @@ async fn main() -> Result<()> {
             .await
             .with_usdc_holdings_token_amount()
             .await
-            .with_jito_tip()
-            .await
             .with_update_switchboard_oracle_tx(&stablebond_mint)
             .await
+            .with_sol_price()
+            .await
             .build();
-
-            let jito_tip_usd_price = if sol_price == 0.0 {
-                0.0
-            } else {
-                market_data.jito_tip.map(|tip| (tip as f64) / 1e9 * sol_price).unwrap_or(0.0)
+        
+            match market_data.sol_price {
+                Some(price) => println!("Current SOL price: ${:.2}", price),
+                None => {
+                    println!("Warning: Unable to get SOL price, skipping this iteration");
+                    continue;
+                }
             };
 
             let strategies = TradingEngine::new()
@@ -220,7 +239,7 @@ async fn main() -> Result<()> {
                 .add_strategy(StrategyEnum::BuyOnJupiterSellOnEtherfuse(
                     buy_on_jupiter_sell_on_etherfuse.clone(),
                 ))
-                .run_strategies(&market_data, &stablebond_mint,&jito_tip_usd_price)
+                .run_strategies(&market_data, &stablebond_mint)
                 .await;
 
             if strategies.is_empty() {

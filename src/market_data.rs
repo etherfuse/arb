@@ -11,6 +11,8 @@ use spl_associated_token_account::{
 use spl_token_2022::ID as SPL_TOKEN_2022_PROGRAM_ID;
 use std::cmp::min;
 use std::{str::FromStr, sync::Arc};
+use crate::coingecko::get_sol_price;
+
 
 pub struct MarketData {
     pub etherfuse_price_per_token: Option<f64>,
@@ -19,6 +21,8 @@ pub struct MarketData {
     pub purchase_liquidity_stablebond_amount: Option<u64>,
     pub usdc_holdings_token_amount: Option<u64>,
     pub jito_tip: Option<u64>,
+    pub jito_tip_usd_price: Option<f64>,
+    pub sol_price: Option<f64>,
     pub switchboard_update_tx: Option<VersionedTransaction>,
 }
 
@@ -34,6 +38,8 @@ pub struct MarketDataBuilder {
     pub purchase_liquidity_stablebond_amount: Option<u64>,
     pub usdc_holdings_token_amount: Option<u64>,
     pub jito_tip: Option<u64>,
+    pub sol_price: Option<f64>,
+    pub jito_tip_usd_price: Option<f64>,
     pub switchboard_update_tx: Option<VersionedTransaction>,
 }
 
@@ -57,6 +63,8 @@ impl MarketDataBuilder {
             purchase_liquidity_stablebond_amount: None,
             usdc_holdings_token_amount: None,
             jito_tip: None,
+            jito_tip_usd_price: None,
+            sol_price: None,            
             switchboard_update_tx: None,
         }
     }
@@ -69,6 +77,8 @@ impl MarketDataBuilder {
             purchase_liquidity_stablebond_amount: self.purchase_liquidity_stablebond_amount,
             usdc_holdings_token_amount: self.usdc_holdings_token_amount,
             jito_tip: self.jito_tip,
+            jito_tip_usd_price: self.jito_tip_usd_price,
+            sol_price: self.sol_price,
             switchboard_update_tx: self.switchboard_update_tx,
         }
     }
@@ -123,8 +133,11 @@ impl MarketDataBuilder {
         self
     }
 
-    pub async fn with_jito_tip(mut self) -> Self {
-        self.jito_tip = Some(self.jito_client.get_jito_tip().await.unwrap());
+    pub async fn with_sol_price(mut self) -> Self {
+        // Default to $300 if Coingecko is down.
+        self.jito_tip = Some(*self.jito_client.wss_client.read().unwrap());
+        self.sol_price = Some(get_sol_price().await.unwrap_or(300.0));
+        self.jito_tip_usd_price = Some(self.jito_tip.unwrap() as f64 / 1e9 * self.sol_price.unwrap());
         self
     }
 
