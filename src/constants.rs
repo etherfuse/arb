@@ -11,3 +11,5 @@ pub const MAX_TRADE_PERCENT: f64 = 1.0;
 pub const INITIAL_POINTS: usize = 8;
 pub const MAX_RETRIES: u32 = 3;
 pub const RETRY_DELAY_MS: u64 = 60000;
+
+pub const SLIPPAGE_BIPS: u64 = 20;
