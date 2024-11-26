@@ -4,7 +4,8 @@ use crate::math::{TokenAmountExt, UiAmountExt};
 use crate::{
     constants::{
         INITIAL_POINTS, MAX_RETRIES, MAX_TRADE_PERCENT, MAX_USDC_AMOUNT_PER_TRADE,
-        MIN_TRADE_PERCENT, MIN_USDC_AMOUNT, RETRY_DELAY_MS, STABLEBOND_DECIMALS, USDC_DECIMALS,
+        MIN_TRADE_PERCENT, MIN_USDC_AMOUNT, RETRY_DELAY_MS, SLIPPAGE_BIPS, STABLEBOND_DECIMALS,
+        USDC_DECIMALS,
     },
     jupiter::JupiterClient,
 };
@@ -92,7 +93,7 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
         md: &MarketData,
         stablebond_mint: &Pubkey,
     ) -> Result<StrategyResult> {
-        let sell_liquidity_usdc_amount = md
+        let mut sell_liquidity_usdc_amount = md
             .sell_liquidity_usdc_amount
             .ok_or_else(|| anyhow::anyhow!("Missing sell_liquidity_usdc_amount"))?;
         let usdc_holdings_token_amount = md
@@ -112,6 +113,17 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
                 "Sell liquidity in USDC is required for this strategy"
             ));
         }
+
+        sell_liquidity_usdc_amount =
+            match adjust_amount_for_slippage(sell_liquidity_usdc_amount, SLIPPAGE_BIPS) {
+                Ok(adjusted_amount) => adjusted_amount,
+                Err(e) => {
+                    return Err(anyhow::anyhow!(
+                        "Error adjusting amount for slippage: {}",
+                        e
+                    ));
+                }
+            };
 
         let max_usdc_token_amount_to_redeem = (sell_liquidity_usdc_amount
             .min(usdc_holdings_token_amount))
@@ -189,7 +201,10 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
             println!("Trade Size: {}% of max", trade_percent * 100.0);
             println!("USDC Amount: {}", usdc_amount.to_ui_amount(USDC_DECIMALS));
             println!("Price Impact: {:.2}%", price_impact * 100.0);
-            println!("Jito tip usd price: {}", md.jito_tip_usd_price.unwrap_or(0.10));
+            println!(
+                "Jito tip usd price: {}",
+                md.jito_tip_usd_price.unwrap_or(0.10)
+            );
             println!("Potential Profit: {}", potential_profit);
             println!("Buy price on jupiter: {}", price_when_buying);
             println!("Sell price on etherfuse: {}", etherfuse_price_per_token);
@@ -197,7 +212,7 @@ impl Strategy for BuyOnJupiterSellOnEtherfuse {
 
             if potential_profit > best_profit {
                 println!("\n🎯 New best trade found!");
-                println!("Previous best profit: {}",best_profit);
+                println!("Previous best profit: {}", best_profit);
                 println!("New best profit: {}", potential_profit);
 
                 best_profit = potential_profit;
@@ -359,7 +374,10 @@ impl Strategy for BuyOnEtherfuseSellOnJupiter {
             println!("Trade Size: {}% of max", trade_percent * 100.0);
             println!("USDC Amount: {}", usdc_amount.to_ui_amount(USDC_DECIMALS));
             println!("Price Impact: {:.2}%", price_impact * 100.0);
-            println!("Jito tip usd price: {}", md.jito_tip_usd_price.unwrap_or(0.10));
+            println!(
+                "Jito tip usd price: {}",
+                md.jito_tip_usd_price.unwrap_or(0.10)
+            );
             println!("Potential Profit: {}", potential_profit);
             println!("Buy price on etherfuse: {}", etherfuse_price_per_token);
             println!("Sell price on jupiter: {}", price_per_token_when_selling);
@@ -423,4 +441,10 @@ impl std::fmt::Debug for StrategyResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Profit: {}, Tx Count: {}", self.profit, self.txs.len())
     }
+}
+
+fn adjust_amount_for_slippage(amount: u64, bips: u64) -> Result<u64> {
+    let subtraction =
+        math::checked_mul(amount, bips).and_then(|product| math::checked_div(product, 10000))?;
+    math::checked_sub(amount, subtraction)
 }

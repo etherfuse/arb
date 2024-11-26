@@ -125,6 +125,28 @@ where
     Ok(res)
 }
 
+pub fn checked_add<T>(arg1: T, arg2: T) -> Result<T>
+where
+    T: num_traits::PrimInt + Display,
+{
+    if let Some(res) = arg1.checked_add(&arg2) {
+        Ok(res)
+    } else {
+        return Err(anyhow!("Math overflow"));
+    }
+}
+
+pub fn checked_sub<T>(arg1: T, arg2: T) -> Result<T>
+where
+    T: num_traits::PrimInt + Display,
+{
+    if let Some(res) = arg1.checked_sub(&arg2) {
+        Ok(res)
+    } else {
+        return Err(anyhow!("Math overflow"));
+    }
+}
+
 pub fn to_ui_amount(amount: u64, decimals: u8) -> Result<f64> {
     checked_float_div(
         checked_as_f64(amount)?,
